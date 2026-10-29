@@ -1,3 +1,12 @@
+# Elementarr 0.4.1 public-update validation - October 29, 2026
+
+- **137 integration checks passed on Carbon Windows and in Docker**, including a complete anonymous release/asset flow using real published signed metadata, a GitHub storage redirect, legacy token removal with preferences preserved, and safe rate-limit handling.
+- The actual update client verified the live public repository's latest signed release without any supplied or saved GitHub credential. Fresh-install defaults enable both scheduled checks and automatic installation.
+- The update UI no longer requests GitHub tokens. The user README now covers installation, Plex/TMDB setup, features, public automatic updates, and local backups; machine-specific development/deployment instructions remain in the separate developer guide.
+- The same-source Windows installer and update ZIP use the existing pinned publisher signing key. Private application data, encryption keys, and signing credentials remain excluded from source and release artifacts.
+
+The following 0.4.0 evidence predates public hosting. Its private-token setup instructions describe the earlier version and are superseded by 0.4.1.
+
 # Elementarr 0.4.0 validation - October 29, 2026
 
 - **134 integration checks passed on Carbon Windows and in Docker.** Fixture coverage includes Plex-only ownership, independent movie/TV stores and ID namespaces, Plex parent-path recovery, Sonarr add destinations/acknowledgements, authenticated poster proxying, persistent exact-item movie-history removal, restoration, secret redaction, signed-update validation, unsafe archive rejection, and failed-startup rollback.

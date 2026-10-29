@@ -155,7 +155,7 @@ public static class AppHost
         api.MapGet("/settings", Settings);
         api.MapGet("/updates", (UpdateService updates) => Results.Ok(new { updates.Status, updates.CanInstall,
             enabled = updates.Preferences.Enabled, autoInstall = updates.Preferences.AutoInstall,
-            hasToken = updates.Preferences.Token.Length > 0, repository = Elementarr.UpdateCore.ReleaseTrust.Repository }));
+            repository = Elementarr.UpdateCore.ReleaseTrust.Repository }));
         api.MapPost("/updates/settings", async (UpdatePreferenceRequest request, UpdateService updates, CancellationToken ct) =>
         { await updates.SaveAsync(request, ct); return Results.Ok(); });
         api.MapPost("/updates/check", async (UpdateService updates, CancellationToken ct) => Results.Ok(await updates.CheckAsync(ct)));

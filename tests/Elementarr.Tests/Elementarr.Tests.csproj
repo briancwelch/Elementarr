@@ -5,5 +5,6 @@
   <ItemGroup>
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <ProjectReference Include="../../src/Elementarr/Elementarr.csproj" />
+    <None Update="Fixtures/*" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

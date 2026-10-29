@@ -1,6 +1,6 @@
 # Elementarr Windows service
 
-Run `Elementarr-0.4.0-win-x64-Setup.exe` on Windows 10/11 x64. The installer includes .NET 10 and requires administrator approval to register the service. Docker, Node.js, a separate .NET installation, and Git are not required on the production machine.
+Run the latest `Elementarr-<version>-win-x64-Setup.exe` from [Releases](https://github.com/briancwelch/Elementarr/releases/latest) on Windows 10/11 x64. The installer includes .NET 10 and requires administrator approval to register the service. Docker, Node.js, a separate .NET installation, and Git are not required on the production machine.
 
 The installer asks for a **hostname**, **operating port**, and **local-only or private LAN access**. The default is `http://localhost:8090`. For LAN access, use an existing reachable hostname such as your computer name and select private LAN access. This adds a firewall rule restricted to the Private profile and local subnet. It does not create a DNS record. The finish page and tray menu show the configured URL.
 
@@ -14,11 +14,11 @@ TMDB supplies movie and TV posters, descriptions, ratings, genres, credits, and 
 
 Configure your own Radarr/Sonarr URL and API key, check connections, and choose each service's root folder and quality profile. Movie and TV histories remain separate. TV artwork can fall back to authenticated Sonarr/Plex image proxies; source credentials are never placed in image URLs. Existing incomplete TV snapshots repair in the background, with an explicit Refresh TV metadata & matches action available in Connections.
 
-## Private automatic updates
+## Public automatic updates
 
-In **Connections > Automatic updates**, enter a fine-grained GitHub token scoped only to the private `briancwelch/Elementarr` repository with **Contents: read**. The token stays protected on this installation and is never bundled with software. Private repository access is required to read private release assets; it is independent of Plex sign-in. Tokens must be renewed if they expire or are revoked.
+Public automatic updates are enabled by default. No GitHub account, token, or update configuration is required. Existing installations keep their saved check/install preferences, and legacy GitHub update tokens are discarded.
 
-Automatic checks run after startup and every six hours. Automatic installation can be disabled independently, and Check for updates / Install update remain explicit actions. The installed Windows service downloads stable releases using GitHub's authenticated release-asset API. It verifies a publisher-signed manifest and the complete ZIP's SHA-256 and byte count before stopping anything. Storage redirects do not receive the GitHub token.
+The installed Windows service checks the public stable release after startup and every six hours. Automatic installation can be disabled independently in **Connections > Automatic updates**; Check for updates / Install update remain explicit actions. Downloads are anonymous and must pass publisher-signature, SHA-256, and byte-count verification before stopping anything. A temporary GitHub rate limit is reported and retried on the next scheduled check.
 
 The fixed updater stops Elementarr, waits for its executable to exit, backs up application files and private data, installs only the application payload, and requires the new local health endpoint to report the signed version. Failed startup restores the previous application and data. Data, encryption keys, and history are outside the update payload. Tray/updater bootstrap upgrades use the full installer when a newer bootstrap is required; normal automatic updates cover the service and web UI.
 
@@ -32,4 +32,4 @@ In Watched Movie History or Affected history, choose **Remove movie from history
 
 Develop and validate on Carbon using local Docker containers before building or pushing Windows releases. `scripts/Test-Local.ps1` runs Windows and Docker fixture checks and records a fingerprint of validated source. `scripts/Build-Windows.ps1` refuses changed or unvalidated source and requires the original private publisher key. The signing key stays in ignored `.local` storage and must be privately backed up; replacing it breaks trust for existing installations.
 
-Full installer ZIPs contain app, tray, updater, licenses, and service configuration. The separate update ZIP contains only service/web application files. Release JSON/signature/checksums accompany private GitHub releases. No application data or access tokens enter GitHub or release packages. Windows installers are currently not Authenticode-signed; update payloads have independent publisher-signature verification.
+Full installer ZIPs contain app, tray, updater, licenses, and service configuration. The separate update ZIP contains only service/web application files. Release JSON/signature/checksums accompany public GitHub releases. No application data or access tokens enter GitHub or release packages. Windows installers are currently not Authenticode-signed; update payloads have independent publisher-signature verification.

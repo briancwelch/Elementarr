@@ -1,13 +1,12 @@
 import { $, app, api, busy, notify } from './core.js';
 
-/** Displays only safe update state and token-presence flags returned by the authenticated server. */
+/** Displays public release status and the installation's automatic-update preferences. */
 export async function loadUpdates(refreshPreferences = true) {
   const value = await api('updates');
   if (refreshPreferences) { $('#updates-enabled').checked = value.enabled; $('#updates-auto').checked = value.autoInstall; }
-  $('#updates-token').placeholder = value.hasToken ? 'Saved - leave blank to keep' : 'GitHub token with Contents: read';
   $('#updates-version').textContent = `Installed version: ${value.status.currentVersion}${value.status.availableVersion ? ' | Available: ' + value.status.availableVersion : ''}`;
   $('#updates-status').textContent = !value.canInstall ? 'Docker/local development uses source builds. Automatic installation is available in the Windows service.'
-    : !value.hasToken ? 'Add a read-only GitHub token to activate private automatic updates.' : value.status.message || `Update status: ${value.status.stage}`;
+    : value.status.message || 'Public automatic updates are ready. No GitHub token is required.';
   $('#updates-check').disabled = value.status.busy;
   $('#updates-install').disabled = !value.canInstall || value.status.busy || !value.status.availableVersion;
 }
@@ -16,8 +15,8 @@ export async function loadUpdates(refreshPreferences = true) {
 export function bindUpdates() {
   $('#updates-form').addEventListener('submit', async (event) => {
     event.preventDefault(); await busy(event.submitter, async () => {
-      try { await api('updates/settings', { enabled: $('#updates-enabled').checked, autoInstall: $('#updates-auto').checked, token: $('#updates-token').value });
-        $('#updates-token').value = ''; await loadUpdates(); notify('Update preferences saved.');
+      try { await api('updates/settings', { enabled: $('#updates-enabled').checked, autoInstall: $('#updates-auto').checked });
+        await loadUpdates(); notify('Update preferences saved.');
       } catch (error) { notify(error.message, true); }
     });
   });

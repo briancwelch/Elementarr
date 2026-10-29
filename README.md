@@ -1,24 +1,37 @@
 # Elementarr
 
-Private movie and TV tracking with Plex-only sign-in, independent watched histories, Radarr/Sonarr collections, and TMDB discovery. One Plex owner per installation; no personal Plex account is bundled.
+Track your movies and TV shows, explore what to watch next, and manage your collection through Plex, Radarr, and Sonarr. Elementarr runs locally as a Windows service with a tray icon and automatic updates.
 
-Production runs as a self-contained Windows service with a tray companion and publisher-verified automatic updates from the private `briancwelch/Elementarr` GitHub repository. Development and testing remain on Carbon's local Docker containers before building/pushing releases. See [Windows installation, ports, metadata, and updates](docs/WINDOWS.md).
+## Get started
 
-TMDB API access is required for full movie/TV posters and metadata. Obtain a developer credential from [TMDB API settings](https://www.themoviedb.org/settings/api) and paste the **API Read Access Token** into Connections. TMDB's developer API is [free for non-commercial use with attribution](https://developer.themoviedb.org/docs/faq), which Elementarr displays. Authenticated Sonarr/Plex artwork provides a TV fallback. TVDB IDs, TMDB TV IDs, and Plex parent-show paths resolve TV records without mixing them with movies.
+1. Download the latest **Windows Setup.exe** from [Releases](https://github.com/briancwelch/Elementarr/releases/latest).
+2. Run the installer and choose your hostname, port, and local-only or LAN access. The default address is **http://localhost:8090**.
+3. Open Elementarr from the tray icon or Start menu and sign in with **Plex**. The first Plex account becomes the owner of that installation.
+4. Open **Connections**, select your owned Plex server, and configure TMDB. Add Radarr and Sonarr if you use them, then sync your collection and watch history.
 
-**Watched Movie History** and **Watched TV History** use separate models, snapshots, metadata, and browsing routes. Movie history supports persistent removal of all plays of one source item, with deliberate restoration available in Administration. Plex retains its own source records. Sonarr additions use the same button pattern as Radarr, validate the destination, reject duplicates, and search for downloads only when explicitly selected.
+### TMDB posters and metadata
 
-## Local validation and release
+A TMDB **API Read Access Token** is required for full movie and TV posters, descriptions, ratings, cast, and discovery. Create a TMDB account and request developer API access in [TMDB API settings](https://www.themoviedb.org/settings/api), then paste the long API Read Access Token into **Connections > TMDB**.
 
-```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/Test-Local.ps1
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/Build-Windows.ps1 -Compiler C:\path\to\ISCC.exe
-```
+TMDB's developer API is [free for non-commercial use with attribution](https://developer.themoviedb.org/docs/faq). Elementarr displays the required credit. Sonarr and Plex can also supply fallback TV artwork.
 
-Builds require the original ignored `.local/release-signing.pk8` key and a passing source-matched local Docker validation gate. Private keys, Plex/API/GitHub tokens, watch history, data volumes, local probes, and build output are excluded from Git. Future release pushes must remain private.
+## Features
 
-The Windows installer lets users choose hostname, operating port, and local-only/LAN access. The native service runs as LocalService at boot, while the tray runs in the interactive session. Data is kept privately in `%PROGRAMDATA%\Elementarr\data`; backups include the complete directory and its keys. Automatic updates protect that data, verify signed metadata/checksums, and restore the previous application/data if startup fails. A read-only GitHub repository token must be configured per installation to activate private updates.
+- Separate **Watched Movie History** and **Watched TV History**.
+- Movie and TV discovery, recommendations, trending titles, and upcoming movies.
+- Radarr and Sonarr collections, with confirmed add actions and optional download searches.
+- Movie-history removal that stays removed after syncing, with restoration available in Administration. Plex keeps its own records.
+- Windows tray controls to open, start, stop, restart, or exit Elementarr.
+- Configurable hostname, port, and LAN access.
 
-Docker remains the Carbon development environment. Its default URL is http://localhost:8090; `.env.example` controls host binding/port. `compose.radium.yaml` is an optional legacy service-host mapping overlay, not a production dependency. Previous Radium Docker deployments are retained as rollback history after migration to the native service.
+## Automatic updates
 
-See [validation evidence](docs/VALIDATION.md), [deployment guidance](docs/DEPLOYMENT.md), and [third-party notices](docs/THIRD_PARTY.md).
+Automatic updates are enabled by default in the Windows service. Elementarr checks for new public releases after startup and every six hours, verifies the publisher signature and download checksum, and installs newer versions automatically. **No GitHub account or token is needed.**
+
+Use **Connections > Automatic updates** to change preferences or check manually. Updates preserve your settings and history, and failed startup restores the previous application and data.
+
+## Your data
+
+Plex is the only sign-in method, with one owner per installation. Settings, history, and credentials are stored locally in `%PROGRAMDATA%\Elementarr\data`. Back up the complete folder, including its keys. Uninstalling preserves this data.
+
+See the [Windows guide](docs/WINDOWS.md) for installation, ports, tray controls, and backups. [Development and release instructions](docs/DEPLOYMENT.md) and [third-party notices](docs/THIRD_PARTY.md) are available separately.

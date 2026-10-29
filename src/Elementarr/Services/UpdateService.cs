@@ -11,8 +11,8 @@ using Microsoft.Win32;
 
 namespace Elementarr.Services;
 
-public sealed record UpdatePreferences(bool Enabled = true, bool AutoInstall = true, string Token = "");
-public sealed record UpdatePreferenceRequest(bool Enabled, bool AutoInstall, string? Token = null, bool RemoveToken = false);
+public sealed record UpdatePreferences(bool Enabled = true, bool AutoInstall = true);
+public sealed record UpdatePreferenceRequest(bool Enabled, bool AutoInstall);
 public sealed record UpdateStatus(string CurrentVersion, string? AvailableVersion = null, string Stage = "idle",
     string? Message = null, DateTimeOffset? CheckedAt = null, bool Busy = false);
 
@@ -22,6 +22,7 @@ public sealed class UpdateService : BackgroundService
     private readonly string directory;
     private readonly string preferencesPath;
     private readonly IDataProtector protector;
+    private readonly ILogger<UpdateService> logger;
     private readonly SemaphoreSlim mutation = new(1, 1);
     private readonly Channel<bool> installs = Channel.CreateBounded<bool>(1);
     private UpdatePreferences preferences;
@@ -35,26 +36,35 @@ public sealed class UpdateService : BackgroundService
     public UpdateStatus Status => Volatile.Read(ref status);
     public bool CanInstall => OperatingSystem.IsWindows() && WindowsServiceHelpers.IsWindowsService();
 
-    /// <summary>Loads per-installation protected GitHub access without bundling developer credentials or exposing the token through API responses.</summary>
-    public UpdateService(IHttpClientFactory clients, IConfiguration configuration, IDataProtectionProvider protection)
+    /// <summary>Loads update preferences while ignoring legacy access tokens, which public release downloads never use.</summary>
+    public UpdateService(IHttpClientFactory clients, IConfiguration configuration, IDataProtectionProvider protection, ILogger<UpdateService> logger)
     {
         this.clients = clients;
+        this.logger = logger;
         directory = configuration["ELEMENTARR_DATA"]!;
         preferencesPath = Path.Combine(directory, "updates.protected");
         protector = protection.CreateProtector("Elementarr.Updates.v1");
-        preferences = File.Exists(preferencesPath) ? JsonSerializer.Deserialize<UpdatePreferences>(protector.Unprotect(File.ReadAllText(preferencesPath)))
-            ?? throw new InvalidDataException("Stored update preferences are invalid.") : new();
+        preferences = new();
+        if (File.Exists(preferencesPath))
+        {
+            var saved = protector.Unprotect(File.ReadAllText(preferencesPath));
+            preferences = JsonSerializer.Deserialize<UpdatePreferences>(saved) ?? throw new InvalidDataException("Stored update preferences are invalid.");
+            using var document = JsonDocument.Parse(saved);
+            if (document.RootElement.TryGetProperty("Token", out _))
+            {
+                File.WriteAllText(preferencesPath + ".tmp", protector.Protect(JsonSerializer.Serialize(preferences)));
+                File.Move(preferencesPath + ".tmp", preferencesPath, true);
+            }
+        }
     }
 
-    /// <summary>Saves automatic-update preferences while keeping blank saved credentials and supporting explicit token removal.</summary>
+    /// <summary>Saves automatic check/install preferences without accepting or retaining GitHub credentials.</summary>
     public async Task SaveAsync(UpdatePreferenceRequest request, CancellationToken ct)
     {
         await mutation.WaitAsync(ct);
         try
         {
-            var token = request.RemoveToken ? "" : string.IsNullOrWhiteSpace(request.Token) ? preferences.Token : request.Token.Trim();
-            if (token.Length > 4096 || token.Any(char.IsControl)) throw new ArgumentException("The GitHub access token is invalid.");
-            var next = new UpdatePreferences(request.Enabled, request.AutoInstall, token);
+            var next = new UpdatePreferences(request.Enabled, request.AutoInstall);
             await File.WriteAllTextAsync(preferencesPath + ".tmp", protector.Protect(JsonSerializer.Serialize(next)), ct);
             File.Move(preferencesPath + ".tmp", preferencesPath, true);
             Volatile.Write(ref preferences, next);
@@ -62,16 +72,15 @@ public sealed class UpdateService : BackgroundService
         finally { mutation.Release(); }
     }
 
-    /// <summary>Checks only the fixed private repository's stable release and verifies the pinned publisher signature before advertising an update.</summary>
+    /// <summary>Checks the public stable release without authentication and verifies its pinned publisher signature.</summary>
     public async Task<UpdateStatus> CheckAsync(CancellationToken ct)
     {
         await mutation.WaitAsync(ct);
         try
         {
-            if (Preferences.Token.Length == 0) throw new ArgumentException("Add a read-only GitHub token for the private Elementarr repository to activate updates.");
             if (Status.Busy && Status.Stage is "downloading" or "installing") return Status;
             status = status with { Busy = true, Stage = "checking", Message = null };
-            using var response = await SendAsync($"https://api.github.com/repos/{ReleaseTrust.Repository}/releases/latest", true, false, ct);
+            using var response = await SendAsync($"https://api.github.com/repos/{ReleaseTrust.Repository}/releases/latest", false, ct);
             await EnsureSuccessAsync(response);
             var bytes = await ReadBoundedAsync(response, 1024 * 1024, ct);
             release = JsonDocument.Parse(bytes).RootElement.Clone();
@@ -83,12 +92,13 @@ public sealed class UpdateService : BackgroundService
             var newer = Version.Parse(manifest.Version) > Version.Parse(CurrentVersion);
             status = new(CurrentVersion, newer ? manifest.Version : null, "idle", newer ? "A verified update is available." : "Elementarr is up to date.", DateTimeOffset.UtcNow);
         }
-        catch (Exception exception) when (exception is HttpRequestException or InvalidDataException or JsonException or FormatException or ArgumentException or TaskCanceledException)
+        catch (Exception exception) when (exception is HttpRequestException or IOException or InvalidDataException or JsonException or FormatException or ArgumentException or TaskCanceledException)
         {
             manifest = null;
             status = status with { Busy = false, AvailableVersion = null, Stage = "error", Message = SafeError(exception), CheckedAt = DateTimeOffset.UtcNow };
         }
         finally { mutation.Release(); }
+        logger.LogInformation("Public update check: {Stage}. {Message}", Status.Stage, Status.Message);
         return Status;
     }
 
@@ -110,7 +120,7 @@ public sealed class UpdateService : BackgroundService
         {
             while (!stoppingToken.IsCancellationRequested)
             {
-                if (Preferences.Enabled && Preferences.Token.Length > 0 && DateTimeOffset.UtcNow >= nextCheck)
+                if (Preferences.Enabled && DateTimeOffset.UtcNow >= nextCheck)
                 {
                     await CheckAsync(stoppingToken);
                     nextCheck = DateTimeOffset.UtcNow.AddHours(6);
@@ -139,7 +149,7 @@ public sealed class UpdateService : BackgroundService
             await File.WriteAllBytesAsync(Path.Combine(job, "elementarr-update.json"), manifestBytes, ct);
             await File.WriteAllTextAsync(Path.Combine(job, "elementarr-update.sig"), Convert.ToBase64String(signature), ct);
             var asset = FindAsset(manifest.AssetName);
-            using var response = await SendAsync($"https://api.github.com/repos/{ReleaseTrust.Repository}/releases/assets/{(long)asset.Number("id")}", true, true, ct);
+            using var response = await SendAsync($"https://api.github.com/repos/{ReleaseTrust.Repository}/releases/assets/{(long)asset.Number("id")}", true, ct);
             await EnsureSuccessAsync(response);
             await using (var file = File.Create(Path.Combine(job, "update.zip")))
             {
@@ -158,16 +168,16 @@ public sealed class UpdateService : BackgroundService
             start.ArgumentList.Add(job);
             _ = Process.Start(start) ?? throw new IOException("The updater helper could not be started.");
         }
-        catch (Exception exception) when (exception is IOException or HttpRequestException or InvalidDataException or UnauthorizedAccessException or System.ComponentModel.Win32Exception)
+        catch (Exception exception) when (exception is IOException or HttpRequestException or InvalidDataException or UnauthorizedAccessException or System.ComponentModel.Win32Exception or TaskCanceledException)
         { status = status with { Busy = false, Stage = "error", Message = SafeError(exception) }; }
         finally { mutation.Release(); }
     }
 
-    /// <summary>Reads a bounded GitHub release asset using its authenticated API ID rather than a public browser download URL.</summary>
+    /// <summary>Reads a bounded public GitHub release asset by API ID without authentication.</summary>
     private async Task<byte[]> AssetAsync(string name, int limit, CancellationToken ct)
     {
         var asset = FindAsset(name);
-        using var response = await SendAsync($"https://api.github.com/repos/{ReleaseTrust.Repository}/releases/assets/{(long)asset.Number("id")}", true, true, ct);
+        using var response = await SendAsync($"https://api.github.com/repos/{ReleaseTrust.Repository}/releases/assets/{(long)asset.Number("id")}", true, ct);
         await EnsureSuccessAsync(response);
         return await ReadBoundedAsync(response, limit, ct);
     }
@@ -179,13 +189,12 @@ public sealed class UpdateService : BackgroundService
         return matches.Length == 1 ? matches[0] : throw new InvalidDataException("The release is missing a required signed update asset.");
     }
 
-    /// <summary>Follows GitHub's HTTPS asset redirects without forwarding the private-repository token to storage hosts.</summary>
-    private async Task<HttpResponseMessage> SendAsync(string url, bool authenticated, bool binary, CancellationToken ct)
+    /// <summary>Downloads public release data anonymously, permitting asset redirects only to GitHub's HTTPS storage hosts.</summary>
+    private async Task<HttpResponseMessage> SendAsync(string url, bool binary, CancellationToken ct)
     {
         var client = clients.CreateClient("updates");
         using var request = new HttpRequestMessage(HttpMethod.Get, url);
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue(binary ? "application/octet-stream" : "application/vnd.github+json"));
-        if (authenticated) request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", Preferences.Token);
         var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
         if ((int)response.StatusCode is >= 300 and < 400)
         {
@@ -199,11 +208,11 @@ public sealed class UpdateService : BackgroundService
         return response;
     }
 
-    /// <summary>Rejects unauthenticated or failed requests without exposing GitHub response bodies, tokens, or signed asset URLs.</summary>
+    /// <summary>Reports public-feed access and rate-limit failures without exposing response bodies or signed asset URLs.</summary>
     private static Task EnsureSuccessAsync(HttpResponseMessage response)
     {
-        if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden) throw new InvalidDataException("GitHub denied access. Check the token's repository access, Contents: read permission, and expiry.");
-        if (response.StatusCode == HttpStatusCode.NotFound) throw new InvalidDataException("No published update was found, or this token cannot read the private repository.");
+        if (response.StatusCode is HttpStatusCode.Forbidden or HttpStatusCode.TooManyRequests) throw new InvalidDataException("GitHub temporarily limited update checks. Try again later; automatic checks will retry.");
+        if (response.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.Unauthorized) throw new InvalidDataException("No public update was found. Check that the Elementarr repository and stable release are public.");
         if (!response.IsSuccessStatusCode) throw new InvalidDataException($"GitHub returned HTTP {(int)response.StatusCode}.");
         return Task.CompletedTask;
     }

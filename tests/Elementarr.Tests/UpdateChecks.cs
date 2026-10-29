@@ -6,6 +6,10 @@ using System.Text;
 using System.Text.Json;
 using Elementarr;
 using Elementarr.UpdateCore;
+using Elementarr.Services;
+using Microsoft.AspNetCore.DataProtection;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging.Abstractions;
 
 internal static class UpdateChecks
 {
@@ -57,18 +61,42 @@ internal static class UpdateChecks
             catch (IOException) { rejected = true; }
             check(rejected && stops == 2 && starts == 2 && await File.ReadAllTextAsync(Path.Combine(installed, "Elementarr.dll")) == "old", "Failed update health restores the previous application and restarts its service");
             check(await File.ReadAllTextAsync(Path.Combine(root, "private-history.json")) == "history stays intact", "Application rollback leaves persistent watch history outside the binary directory untouched");
+            await CheckPublicFeedAsync(root, check);
         }
         finally
         {
             var resolved = Path.GetFullPath(root);
             if (resolved.StartsWith(Path.GetFullPath(Path.GetTempPath()), StringComparison.OrdinalIgnoreCase) && Path.GetFileName(resolved).StartsWith("elementarr-update-tests-")) Directory.Delete(resolved, true);
         }
-        var preferences = await browser.PostAsJsonAsync("/api/updates/settings", new { enabled = true, autoInstall = false, token = "fixture-github-token" });
-        check(preferences.IsSuccessStatusCode, "The Plex owner can configure private update access and automatic-install preferences");
+        var preferences = await browser.PostAsJsonAsync("/api/updates/settings", new { enabled = true, autoInstall = false });
+        check(preferences.IsSuccessStatusCode, "The Plex owner can configure automatic updates without GitHub credentials");
         var safe = await browser.GetStringAsync("/api/updates");
-        check(!safe.Contains("fixture-github-token") && JsonDocument.Parse(safe).RootElement.Flag("hasToken"), "Update APIs expose credential presence without returning the saved GitHub token");
+        check(!safe.Contains("token", StringComparison.OrdinalIgnoreCase) && !JsonDocument.Parse(safe).RootElement.Flag("autoInstall"), "Public update preferences expose no credential configuration and retain the chosen install policy");
         check((await browser.PostAsJsonAsync("/api/updates/install", new { })).StatusCode == HttpStatusCode.BadRequest, "Portable/test/Docker processes cannot invoke native service installation");
-        await browser.PostAsJsonAsync("/api/updates/settings", new { enabled = true, autoInstall = true, removeToken = true });
+        await browser.PostAsJsonAsync("/api/updates/settings", new { enabled = true, autoInstall = true });
+    }
+
+    /// <summary>Exercises the complete anonymous release/asset flow and migrates legacy credentials without changing saved policies.</summary>
+    private static async Task CheckPublicFeedAsync(string root, Action<bool, string> check)
+    {
+        var data = Path.Combine(root, "public-feed");
+        Directory.CreateDirectory(data);
+        var protection = DataProtectionProvider.Create(new DirectoryInfo(Path.Combine(data, "keys")));
+        var protector = protection.CreateProtector("Elementarr.Updates.v1");
+        var path = Path.Combine(data, "updates.protected");
+        await File.WriteAllTextAsync(path, protector.Protect("{\"Enabled\":true,\"AutoInstall\":false,\"Token\":\"legacy-fixture-token\"}"));
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> { ["ELEMENTARR_DATA"] = data }).Build();
+        var fixture = new PublicReleaseFixture();
+        using var updates = new UpdateService(fixture, configuration, protection, NullLogger<UpdateService>.Instance);
+        var status = await updates.CheckAsync(default);
+        check(status.Stage == "idle" && status.AvailableVersion is null && fixture.Requests == 4 && fixture.Anonymous,
+            "Public updates verify a real publisher-signed release and follow asset redirects without authentication");
+        check(updates.Preferences.Enabled && !updates.Preferences.AutoInstall && !protector.Unprotect(await File.ReadAllTextAsync(path)).Contains("Token"),
+            "Legacy GitHub tokens are removed while existing automatic-update preferences survive migration");
+        fixture.Limited = true;
+        status = await updates.CheckAsync(default);
+        check(status.Stage == "error" && status.Message!.Contains("limited") && status.AvailableVersion is null,
+            "Anonymous GitHub rate limits leave an actionable retry status without advertising an unverified update");
     }
 
     /// <summary>Builds synthetic archives containing no application or user secrets.</summary>
@@ -83,5 +111,36 @@ internal static class UpdateChecks
     {
         try { action(); return false; }
         catch (Exception exception) when (exception is InvalidDataException or CryptographicException or JsonException) { return true; }
+    }
+}
+
+internal sealed class PublicReleaseFixture : HttpMessageHandler, IHttpClientFactory
+{
+    public int Requests { get; private set; }
+    public bool Anonymous { get; private set; } = true;
+    public bool Limited { get; set; }
+
+    /// <summary>Provides an in-process public release client without making network requests.</summary>
+    public HttpClient CreateClient(string name) => new(this, disposeHandler: false);
+
+    /// <summary>Serves the published 0.4.0 signed metadata, including one GitHub storage redirect, and records authentication regressions.</summary>
+    protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
+    {
+        Requests++;
+        Anonymous &= request.Headers.Authorization is null;
+        if (Limited) return new(HttpStatusCode.TooManyRequests);
+        var url = request.RequestUri!.AbsoluteUri;
+        if (url == $"https://api.github.com/repos/{ReleaseTrust.Repository}/releases/latest")
+            return new(HttpStatusCode.OK) { Content = JsonContent.Create(new { tag_name = "v0.4.0", draft = false, prerelease = false, assets = new[] {
+                new { id = 1, name = "elementarr-update.json" }, new { id = 2, name = "elementarr-update.sig" } } }) };
+        if (url.EndsWith("/releases/assets/1"))
+        {
+            var redirect = new HttpResponseMessage(HttpStatusCode.Found);
+            redirect.Headers.Location = new Uri("https://release-assets.githubusercontent.com/elementarr/manifest");
+            return redirect;
+        }
+        var name = url == "https://release-assets.githubusercontent.com/elementarr/manifest" ? "elementarr-update.json"
+            : url.EndsWith("/releases/assets/2") ? "elementarr-update.sig" : throw new InvalidOperationException("Unexpected update request.");
+        return new(HttpStatusCode.OK) { Content = new ByteArrayContent(await File.ReadAllBytesAsync(Path.Combine(AppContext.BaseDirectory, "Fixtures", name), ct)) };
     }
 }

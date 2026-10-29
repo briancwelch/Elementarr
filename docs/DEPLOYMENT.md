@@ -1,4 +1,4 @@
-﻿# Carbon development and Radium service deployment
+# Carbon development and Radium service deployment
 
 Develop and validate locally at `D:\Projects\Elementarr` on Carbon. Production runs as the **Elementarr Windows service** on Radium at `http://radium.local:8090`, with Plex-only sign-in and one owner per installation. Docker is retained for Carbon development and Radium rollback.
 
@@ -10,13 +10,13 @@ Run these on Carbon, in order:
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/Test-Local.ps1
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/Build-Windows.ps1 -Compiler C:\path\to\ISCC.exe
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File tests/Test-Windows.ps1
-# Review and commit source, then publish the private source and signed release assets:
+# Review and commit source, then publish the source and signed release assets:
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/Publish-Release.ps1
 ```
 
-The build gate binds validation to a source fingerprint. Changed code must pass the Carbon Windows/Docker checks again. Keep the original `.local/release-signing.pk8` key in private backup; installed clients trust its public key. Never commit credentials, data, encryption keys, or release signing material. The GitHub repository must stay private.
+The build gate binds validation to a source fingerprint. Changed code must pass the Carbon Windows/Docker checks again. Keep the original `.local/release-signing.pk8` key in private backup; installed clients trust its public key. Never commit credentials, data, encryption keys, or release signing material. The repository and signed release assets must be public for anonymous updates.
 
-Each installed service needs its own read-only GitHub token scoped to `briancwelch/Elementarr` with **Contents: read**, entered in Connections > Updates. No developer credential is distributed. Enabled services check every six hours and apply newer signed service/web payloads automatically, backing up the application and private data first. See [Windows installation and updates](WINDOWS.md).
+Installed services download stable releases anonymously; users do not need a GitHub account or token. Automatic checks and installation are enabled by default, with checks after startup and every six hours. Application files and private data are backed up before applying newer signed payloads. See [Windows installation and updates](WINDOWS.md).
 
 ## Initial Radium migration
 
