@@ -30,6 +30,8 @@ TV and Windows packaging references:
 - [Inno Setup](https://jrsoftware.org/isinfo.php): installer built locally using the Inno Setup 7.1.0 compiler distributed by the Tools.InnoSetup NuGet package. The compiler is a build tool and is not redistributed with Elementarr.
 - The self-contained Windows application includes the official Microsoft .NET/ASP.NET Core runtime and its published license/third-party notices.
 
-Windows service release 0.4 uses Microsoft.Extensions.Hosting.WindowsServices and System.ServiceProcess.ServiceController 10.0.14, the official self-contained .NET/ASP.NET Core/Windows Desktop 10.0.14 runtimes, and Inno Setup 7. Runtime licenses accompany each native component. The tray/installer icon derives from the bundled Font Awesome Free 7.3.1 `layer-group` SVG (Font Awesome, CC BY 4.0).
+Windows service release 0.4 uses Microsoft.Extensions.Hosting.WindowsServices and System.ServiceProcess.ServiceController 10.0.14, the official self-contained .NET/ASP.NET Core/Windows Desktop 10.0.14 runtimes, and Inno Setup 7. Runtime licenses accompany each native component. The atom-and-clapperboard brand mark is an Elementarr vector asset shared by the app, favicon, and Windows tray/installer icons. Font Awesome Free remains the source of interface icons.
 
 Private update assets follow [GitHub release-asset authentication](https://docs.github.com/en/rest/releases/assets); signing and checksums use .NET's ECDSA P-256 and SHA-256 implementations. Windows hosting follows [Microsoft's Windows Service guidance](https://learn.microsoft.com/en-us/aspnet/core/host-and-deploy/windows-service?view=aspnetcore-10.0).
+
+Frontend development tests use jsdom 30.1.3 (MIT) to exercise the production JavaScript modules against loopback fixture endpoints. This development dependency is not distributed in Windows application packages.

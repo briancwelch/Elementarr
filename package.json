@@ -1,0 +1,11 @@
+{
+  "name": "elementarr-development",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test:ui": "node --experimental-vm-modules --test tests/frontend.test.mjs"
+  },
+  "devDependencies": {
+    "jsdom": "30.1.3"
+  }
+}

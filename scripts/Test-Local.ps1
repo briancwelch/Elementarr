@@ -8,6 +8,10 @@ try {
     $before=& (Join-Path $PSScriptRoot Get-SourceFingerprint.ps1)
     & dotnet run --project tests/Elementarr.Tests -c Release
     if ($LASTEXITCODE -ne 0) { throw 'Local integration checks failed.' }
+    & npm.cmd ci --no-audit --no-fund
+    if ($LASTEXITCODE -ne 0) { throw 'Frontend test dependencies could not be restored.' }
+    & npm.cmd run test:ui
+    if ($LASTEXITCODE -ne 0) { throw 'Frontend DOM regression checks failed.' }
     Get-ChildItem src/Elementarr/wwwroot -Filter *.js | ForEach-Object { & node --check $_.FullName; if ($LASTEXITCODE -ne 0) { throw 'Frontend syntax check failed.' } }
     Get-ChildItem scripts,tests,packaging -Recurse -Filter *.ps1 | ForEach-Object {
         $tokens=$null; $issues=$null

@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-label="Elementarr atom and clapperboard">
+  <g fill="none" stroke="#64dfd2" stroke-width="8" stroke-linecap="round">
+    <ellipse cx="128" cy="139" rx="112" ry="39"/>
+    <ellipse cx="128" cy="139" rx="112" ry="39" transform="rotate(60 128 139)"/>
+    <ellipse cx="128" cy="139" rx="112" ry="39" transform="rotate(120 128 139)"/>
+  </g>
+  <rect x="75" y="115" width="108" height="79" rx="9" fill="#101723" stroke="#64dfd2" stroke-width="8"/>
+  <g transform="rotate(-13 75 115)">
+    <rect x="71" y="85" width="116" height="31" rx="5" fill="#64dfd2"/>
+    <path d="M86 85h17l-15 31H71zm36 0h17l-15 31h-17zm36 0h17l-15 31h-17z" fill="#101723"/>
+  </g>
+  <circle cx="129" cy="154" r="11" fill="#64dfd2"/>
+</svg>

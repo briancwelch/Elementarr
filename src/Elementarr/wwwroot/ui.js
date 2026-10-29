@@ -87,6 +87,14 @@ Object.assign(ui.words, {
   'admin.ink': 'Text color', 'admin.muted': 'Secondary text', 'admin.border': 'Border color',
   'admin.bodyFont': 'Body font family', 'admin.headingFont': 'Heading font family', 'admin.googleFonts': 'Load selected families from Google Fonts',
   'admin.fontSize': 'Base font size', 'admin.headingSize': 'Heading size', 'admin.navWidth': 'Navigation width',
+  'admin.navigationFontScale': 'Navigation text', 'admin.cardFontScale': 'Cards and timelines',
+  'admin.detailFontScale': 'Details and dialogs', 'admin.controlFontScale': 'Forms and controls',
+  'admin.captionFontScale': 'Captions and help text', 'admin.badgeFontScale': 'Badge text', 'admin.toastFontScale': 'Notification text',
+  'admin.badgeRadius': 'Badge corner radius', 'admin.toastDuration': 'Notification duration',
+  'admin.colorsTitle': 'Colors', 'admin.typographyTitle': 'Typography', 'admin.layoutTitle': 'Layout and notifications',
+  'admin.typographyHelp': 'Base font size scales the whole interface. Category controls adjust text relative to that base; heading size is measured at the default 14 px base.',
+  'view.changelog.eyebrow': 'WHAT IS NEW', 'view.changelog.title': 'Elementarr, evolving.',
+  'view.changelog.caption': 'Changelog', 'view.changelog.description': 'Release notes included with this installation. Updates preserve your settings and watch history.',
   'admin.contentWidth': 'Maximum content width', 'admin.cornerRadius': 'Corner radius', 'admin.gridGap': 'Grid spacing',
   'admin.posterSize': 'Default poster width', 'admin.pageSize': 'Default items per page', 'admin.timelineZoom': 'Default timeline zoom',
   'admin.showPosters': 'Show timeline posters', 'admin.showBackdrops': 'Show timeline thumbnails', 'admin.showRatings': 'Show poster ratings',
@@ -137,8 +145,12 @@ export function applyAppearance(settings) {
   const style = document.documentElement.style;
   for (const key of ['canvas', 'panel', 'accent', 'ink', 'muted', 'border'])
     if (/^#[\da-f]{6}$/i.test(settings[key])) style.setProperty(`--${key === 'border' ? 'line' : key}`, settings[key]);
-  const numeric = { fontSize: 'base-size', headingSize: 'heading-size', navWidth: 'nav-expanded', contentWidth: 'content-width', cornerRadius: 'radius', gridGap: 'grid-gap' };
+  const numeric = { fontSize: 'base-size', navWidth: 'nav-expanded', contentWidth: 'content-width', cornerRadius: 'radius', badgeRadius: 'badge-radius', gridGap: 'grid-gap' };
   for (const [key, variable] of Object.entries(numeric)) if (Number.isFinite(Number(settings[key]))) style.setProperty(`--${variable}`, `${Number(settings[key])}px`);
+  style.setProperty('--heading-size', `calc(1rem * ${Number(settings.headingSize || 36) / 14})`);
+  style.setProperty('--text-ratio', String(Number(settings.fontSize || 14) / 14));
+  for (const key of ['navigation', 'card', 'detail', 'control', 'caption', 'badge', 'toast'])
+    style.setProperty(`--${key}-font-scale`, String(Number(settings[key + 'FontScale'] ?? 100) / 100));
   for (const [key, variable] of [['bodyFont', 'body-font'], ['headingFont', 'heading-font']])
     if (/^[a-zA-Z0-9][a-zA-Z0-9 -]{0,79}$/.test(settings[key])) style.setProperty(`--${variable}`, `"${settings[key]}", system-ui, sans-serif`);
   document.body.classList.toggle('no-animation', !settings.animations);

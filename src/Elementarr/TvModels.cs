@@ -4,7 +4,8 @@ namespace Elementarr;
 public sealed record TvSeries(int? TmdbId, int TvdbId, string Title, int Year, string Overview,
     string? Poster, double? Score = null, bool InSonarr = false, int EpisodeFileCount = 0,
     int EpisodeCount = 0, bool HasWatchedEpisodes = false, string Reason = "", int SonarrId = 0,
-    TvFacts? Facts = null, DateTimeOffset? MetadataUpdatedAt = null);
+    TvFacts? Facts = null, DateTimeOffset? MetadataUpdatedAt = null, TvAiringEpisode? AiringEpisode = null);
+public sealed record TvAiringEpisode(int Season, int Episode, string Title, DateTimeOffset AirsAt);
 public sealed record TvWatch(string Id, string RatingKey, string SeriesKey, string SeriesTitle,
     string EpisodeTitle, int? Season, int? Episode, long WatchedAt, int? TmdbId, int? TvdbId, string? Poster = null, int SonarrId = 0);
 public sealed record TvFacts(List<string> Genres, string Status, int Seasons, int Episodes,

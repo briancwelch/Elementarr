@@ -148,9 +148,11 @@ public sealed class TvService(StateStore store, MediaApi api, PlexService plex, 
         var size = int.TryParse(query["pageSize"], out number) ? number : 25;
         if (page is < 1 or > 500 || size is not (10 or 25 or 50 or 100) || text.Length > 200)
             throw new ArgumentException("Choose a valid TV page and a search of up to 200 characters.");
-        if (view == "tv-history")
+        if (view == "tv-upcoming") return await UpcomingAsync(text, page, size, ct);
+        if (view is "tv-history" or "tv-issues")
         {
-            var rows = store.Tv.History.Where(x => text.Length == 0 || x.SeriesTitle.Contains(text, StringComparison.OrdinalIgnoreCase)
+            var rows = store.Tv.History.Where(x => view != "tv-issues" || (x.TmdbId is null && x.TvdbId is null))
+                .Where(x => text.Length == 0 || x.SeriesTitle.Contains(text, StringComparison.OrdinalIgnoreCase)
                 || x.EpisodeTitle.Contains(text, StringComparison.OrdinalIgnoreCase)).ToArray();
             if (query["order"] == "asc") rows = rows.Reverse().ToArray();
             var pages = Math.Max(1, (int)Math.Ceiling(rows.Length / (double)size));
@@ -190,6 +192,32 @@ public sealed class TvService(StateStore store, MediaApi api, PlexService plex, 
             series = Sort(series, query["sort"]!, query["order"]!);
         }
         return new(series, [], page, totalPages, count, page < totalPages, notice);
+    }
+
+    /// <summary>Lists actual upcoming Sonarr episodes over fourteen days, preserving air times and keeping movie discovery separate.</summary>
+    private async Task<TvPage> UpcomingAsync(string text, int page, int size, CancellationToken ct)
+    {
+        const string notice = "Episodes airing in the next 14 days from your Sonarr collection. Air times use your browser's local time.";
+        if (store.Settings.SonarrKey.Length == 0) return new([], [], 1, 1, 0, false, "Connect Sonarr in Connections to see episodes airing soon in your collection.");
+        var now = DateTimeOffset.UtcNow;
+        var end = now.AddDays(14);
+        var response = await api.SonarrAsync(store.Settings, $"calendar?start={Uri.EscapeDataString(now.ToString("O"))}&end={Uri.EscapeDataString(end.ToString("O"))}&includeSeries=true", ct);
+        if (response.ValueKind != JsonValueKind.Array) throw new UpstreamException("Sonarr returned an invalid episode calendar.");
+        List<TvSeries> episodes = [];
+        foreach (var episode in response.Items())
+        {
+            if (!DateTimeOffset.TryParse(episode.Text("airDateUtc"), System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.AssumeUniversal, out var air) || air < now || air > end) continue;
+            var seriesId = (int)episode.Number("seriesId");
+            var show = store.Tv.Library.FirstOrDefault(x => x.SonarrId == seriesId);
+            if (show is null && episode.TryGetProperty("series", out var series) && series.ValueKind == JsonValueKind.Object) show = ParseSonarr(series);
+            if (show is null || (text.Length > 0 && !show.Title.Contains(text, StringComparison.OrdinalIgnoreCase)
+                && !episode.Text("title").Contains(text, StringComparison.OrdinalIgnoreCase))) continue;
+            episodes.Add(Annotate(show) with { AiringEpisode = new((int)episode.Number("seasonNumber"), (int)episode.Number("episodeNumber"), episode.Text("title"), air) });
+        }
+        episodes = episodes.OrderBy(x => x.AiringEpisode!.AirsAt).ToList();
+        var pages = Math.Max(1, (int)Math.Ceiling(episodes.Count / (double)size));
+        return new(episodes.Skip((page - 1) * size).Take(size).ToList(), [], page, pages, episodes.Count, page < pages, notice);
     }
 
     /// <summary>Loads details only from TMDB's TV namespace and annotates them only from the TV snapshot.</summary>

@@ -13,7 +13,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 // Report failures as an ordinary exit code so Windows Error Reporting cannot hold the test executable open.
-try { if (args.Contains("--preview")) await PreviewHost.RunAsync(); else await IntegrationChecks.RunAsync(); return 0; }
+try { if (args.Contains("--preview")) await PreviewHost.RunAsync(args); else await IntegrationChecks.RunAsync(); return 0; }
 catch (Exception exception) { Console.Error.WriteLine(exception); return 1; }
 
 internal static class IntegrationChecks
@@ -31,6 +31,8 @@ internal static class IntegrationChecks
             builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
             { ["ELEMENTARR_PASSWORD"] = "test-only-password-long-enough", ["ELEMENTARR_DATA"] = directory });
             builder.WebHost.UseUrls("http://127.0.0.1:0");
+            builder.Environment.WebRootPath = Path.GetFullPath("src/Elementarr/wwwroot");
+            builder.Environment.WebRootFileProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(builder.Environment.WebRootPath);
             builder.Logging.ClearProviders();
             builder.Logging.AddSimpleConsole().SetMinimumLevel(LogLevel.Error);
             builder.Services.AddSingleton<IHttpClientFactory>(fixture);
@@ -134,6 +136,7 @@ internal static class IntegrationChecks
                 "Radarr scans work with Plex disconnected and optional Tautulli disabled");
             await PlexChecksAsync(browser, fixture, settings);
             await TvChecks.RunAsync(browser, fixture, host.Services, Check);
+            await InterfaceChecks.RunAsync(browser, fixture, host.Services, Check);
             await UpdateChecks.RunAsync(browser, Check);
             await StudioChecks.RunAsync(browser, fixture, host.Services, Check);
             await SuccessAsync(await browser.PostAsJsonAsync("/api/logout", new { }));
@@ -289,6 +292,8 @@ internal sealed class MediaFixture : HttpMessageHandler, IHttpClientFactory
     public string PlexAccountId { get; set; } = "42";
     public string PlexUsername { get; set; } = "fixture.owner";
     public bool PlexResourcesOwned { get; set; } = true;
+    public string PlexThumb { get; set; } = "https://images.plex.tv/avatars/fixture.png";
+    public int AvatarRequests { get; private set; }
     public int SearchCommands { get; private set; }
     public bool FailSearch { get; set; }
     public int MovieDetailRequests { get; private set; }
@@ -301,6 +306,18 @@ internal sealed class MediaFixture : HttpMessageHandler, IHttpClientFactory
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
     {
         var uri = request.RequestUri!;
+        if (uri.Host is "images.plex.tv" or "assets.plex.tv")
+        {
+            if (request.Headers.Contains("X-Plex-Token") || request.Headers.Authorization is not null) throw new InvalidOperationException("Avatar requests must not carry account credentials.");
+            AvatarRequests++;
+            if (uri.AbsolutePath.EndsWith("/redirect") || uri.AbsolutePath.EndsWith("/unsafe"))
+            {
+                var redirect = new HttpResponseMessage(HttpStatusCode.Found);
+                redirect.Headers.Location = new Uri(uri.AbsolutePath.EndsWith("/unsafe") ? "https://evil.example/avatar.png" : "https://assets.plex.tv/avatars/fixture.png");
+                return redirect;
+            }
+            return new(HttpStatusCode.OK) { Content = new ByteArrayContent(Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Zl8sAAAAASUVORK5CYII=")) { Headers = { ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("image/png") } } };
+        }
         if (uri.AbsolutePath == "/api/v2")
         {
             var form = (await request.Content!.ReadAsStringAsync(ct)).Split('&').Select(x => x.Split('=', 2))
@@ -334,7 +351,7 @@ internal sealed class MediaFixture : HttpMessageHandler, IHttpClientFactory
             if (uri.AbsolutePath.EndsWith("/pins")) return Json(new { id = 12345, code = "test-authorization-code" });
             if (uri.AbsolutePath.Contains("/pins/")) return Json(new { id = 12345, authToken = PlexClaimed ? "plex-secret" : null });
             if (!request.Headers.TryGetValues("X-Plex-Token", out var tokens) || tokens.Single() != "plex-secret") throw new InvalidOperationException("Missing Plex cloud token.");
-            if (uri.AbsolutePath.EndsWith("/user")) return Json(new { id = PlexAccountId, username = PlexUsername });
+            if (uri.AbsolutePath.EndsWith("/user")) return Json(new { id = PlexAccountId, username = PlexUsername, thumb = PlexThumb });
             if (uri.AbsolutePath.EndsWith("/resources")) return Json(new[] { new { owned = PlexResourcesOwned, provides = "server", clientIdentifier = "plex-server-1",
                 connections = new[] { new { local = true, relay = false, address = "10.0.0.14", uri = "http://radium.local:32400" } } } });
         }
@@ -369,6 +386,16 @@ internal sealed class MediaFixture : HttpMessageHandler, IHttpClientFactory
             if (FailSonarr) return new(HttpStatusCode.ServiceUnavailable);
             if (!request.Headers.TryGetValues("X-Api-Key", out var sonarrKeys) || sonarrKeys.Single() != "sonarr-secret") throw new InvalidOperationException("Missing Sonarr header credential.");
             if (uri.AbsolutePath.EndsWith("/qualityprofile")) return Json(new[] { new { id = 8, name = "TV HD" } });
+            if (uri.AbsolutePath.EndsWith("/calendar"))
+            {
+                if (!uri.Query.Contains("includeSeries=true") || !uri.Query.Contains("start=") || !uri.Query.Contains("end=")) throw new InvalidOperationException("Calendar requires a bounded window and series data.");
+                return Json(new[] {
+                    new { seriesId = 1, seasonNumber = 2, episodeNumber = 10, title = "Later Episode", airDateUtc = DateTimeOffset.UtcNow.AddDays(2) },
+                    new { seriesId = 1, seasonNumber = 2, episodeNumber = 9, title = "Next Episode", airDateUtc = DateTimeOffset.UtcNow.AddDays(1) },
+                    new { seriesId = 1, seasonNumber = 1, episodeNumber = 1, title = "Past Episode", airDateUtc = DateTimeOffset.UtcNow.AddDays(-1) },
+                    new { seriesId = 1, seasonNumber = 3, episodeNumber = 1, title = "Outside Window", airDateUtc = DateTimeOffset.UtcNow.AddDays(16) }
+                });
+            }
             if (uri.AbsolutePath.EndsWith("/rootfolder")) return Json(new[] { new { path = "/tv" } });
             if (uri.AbsolutePath.EndsWith("/lookup"))
             {

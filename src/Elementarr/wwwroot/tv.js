@@ -3,9 +3,11 @@ import { $, app, api, busy, escape, imageUrl, notify, number } from './core.js';
 import { ui, t } from './ui.js';
 import { protectImages, applyTimelinePreferences, bindTimelineDrag } from './movies.js';
 
-export const tvViews = ['tv-for-you', 'tv-trending', 'tv-top-rated', 'tv-library', 'tv-history'];
+export const tvViews = ['tv-for-you', 'tv-upcoming', 'tv-trending', 'tv-top-rated', 'tv-library', 'tv-history', 'tv-issues'];
 for (const [view, title, caption, description] of [
   ['tv-for-you', 'Your next great series.', 'TV for you', 'Recommendations from your watched TV series. Trending TV appears until your first matched episode sync.'],
+  ['tv-upcoming', 'Make room for the next episode.', 'Episodes Airing Soon', 'Episodes airing in the next 14 days from your Sonarr collection, in your local time.'],
+  ['tv-issues', 'Bring every episode into focus.', 'Affected TV History', 'Episodes without a series identifier. Correct the parent series in Plex, then refresh TV metadata. Movie matching stays separate.'],
   ['tv-trending', 'What is on everyone’s screen?', 'Trending TV', 'Discover this week’s trending television.'],
   ['tv-top-rated', 'The series that stay with you.', 'Top rated TV', 'Explore highly rated television from TMDB.'],
   ['tv-library', 'Your television collection.', 'TV collection', 'Series managed by Sonarr, with episode file counts.'],
@@ -95,8 +97,13 @@ export function renderTvSeries(series) {
   const grid = document.createElement('div'); grid.className = `movie-grid${app.preferences.layout === 'list' ? ' list-layout' : ''}`;
   for (const show of series) {
     const card = document.createElement('article'); card.className = 'movie-card'; const poster = tvImage(show);
-    card.innerHTML = `<button class="poster-button" aria-label="${escape(show.title)}"><span class="poster-fallback"><i class="fa-solid fa-tv" aria-hidden="true"></i></span>${poster ? `<img src="${poster}" alt="" loading="lazy" referrerpolicy="no-referrer">` : ''}</button><div class="movie-info"><button class="movie-title-button"><h3>${escape(show.title)}</h3></button><p class="movie-meta">${escape(show.year || 'TBA')} · TMDB ${escape(number(show.score))}</p><p class="field-help">${show.inSonarr ? `In Sonarr · ${show.episodeFileCount} episode files` : 'Add to Sonarr'}</p>${show.hasWatchedEpisodes ? '<p class="field-help">Has watched episodes</p>' : ''}<p class="movie-reason">${escape(show.reason)}</p><p class="list-overview">${escape(show.overview)}</p></div>`;
+    card.innerHTML = `<button class="poster-button" aria-label="${escape(show.title)}"><span class="poster-fallback"><i class="fa-solid fa-tv" aria-hidden="true"></i></span>${poster ? `<img src="${poster}" alt="" loading="lazy" referrerpolicy="no-referrer">` : ''}</button><div class="movie-info"><button class="movie-title-button"><h3>${escape(show.title)}</h3></button><p class="movie-meta"><span>${escape(show.year || 'TBA')} · TMDB ${escape(number(show.score))}</span><button class="movie-add badge ${show.inSonarr ? 'badge-subtle' : 'badge-outline'} theme-primary"><i class="fa-solid ${show.inSonarr ? 'fa-check' : 'fa-plus'}" aria-hidden="true"></i>${show.inSonarr ? 'In Sonarr' : 'Add to Sonarr'}</button></p><p class="field-help">${show.inSonarr ? `In Sonarr · ${show.episodeFileCount} episode files` : 'Add to Sonarr'}</p>${show.hasWatchedEpisodes ? '<p class="field-help">Has watched episodes</p>' : ''}<p class="movie-reason">${escape(show.reason)}</p><p class="list-overview">${escape(show.overview)}</p></div>`;
     card.querySelectorAll('button').forEach((button) => button.addEventListener('click', () => openTv(show)));
+    if (show.airingEpisode) {
+      const airing = document.createElement('p'); airing.className = 'episode-airing field-help';
+      airing.textContent = `S${String(show.airingEpisode.season).padStart(2, '0')}E${String(show.airingEpisode.episode).padStart(2, '0')} | ${show.airingEpisode.title} | ${new Date(show.airingEpisode.airsAt).toLocaleString()}`;
+      card.querySelector('.movie-info').append(airing);
+    }
     grid.append(card);
   }
   $('#content').replaceChildren(grid); protectImages(grid);
@@ -118,8 +125,8 @@ export function renderTvHistory(plays) {
 }
 
 /** Fetches TV pages independently of movie filters and movie pagination state. */
-export async function loadTvPage() {
+export async function loadTvPage(signal) {
   const params = new URLSearchParams({ view: app.view, query: app.query, page: app.page,
     pageSize: app.preferences.pageSize, sort: $('#tv-sort').value, order: $('#tv-order').value });
-  return api('tv/browse?' + params);
+  return api('tv/browse?' + params, undefined, { signal });
 }

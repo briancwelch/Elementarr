@@ -1,4 +1,4 @@
-import { t } from './ui.js';
+import { ui, t } from './ui.js';
 
 /** Finds a single UI element. */
 export const $ = (selector) => document.querySelector(selector);
@@ -11,8 +11,8 @@ export function escape(value) {
 }
 
 /** Calls the local authenticated API with CSRF on writes and returns only sanitized server errors. */
-export async function api(path, body) {
-  const response = await fetch(`/api/${path}`, { method: body === undefined ? 'GET' : 'POST', credentials: 'same-origin',
+export async function api(path, body, options = {}) {
+  const response = await fetch(`/api/${path}`, { method: body === undefined ? 'GET' : 'POST', credentials: 'same-origin', signal: options.signal,
     headers: body === undefined ? {} : { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': app.csrf },
     body: body === undefined ? undefined : JSON.stringify(body) });
   const data = await response.json().catch(() => ({}));
@@ -24,15 +24,30 @@ export async function api(path, body) {
   return data;
 }
 
-/** Shows dismissible toasts; errors remain until dismissed, and accepted asynchronous commands can update their toast. */
-export function notify(message, error = false, persistent = false) {
+/** Shows themed notifications with a configurable countdown, pause-on-hover/focus, and an automatic fade. */
+export function notify(message, error = false) {
   const notice = document.createElement('div'); notice.className = `notification${error ? ' error' : ''}`;
   notice.setAttribute('role', error ? 'alert' : 'status');
-  notice.innerHTML = `<i class="fa-solid ${error ? 'fa-circle-exclamation' : 'fa-circle-check'}" aria-hidden="true"></i><span>${escape(message)}</span><button class="btn-text btn-icon" aria-label="${escape(t('action.dismiss'))}"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>`;
-  notice.querySelector('button').addEventListener('click', () => notice.remove());
-  $('#notifications').append(notice);
-  placeNotifications();
-  if (!error && !persistent) setTimeout(() => notice.remove(), 7500);
+  notice.innerHTML = `<i class="fa-solid ${error ? 'fa-circle-exclamation' : 'fa-circle-check'}" aria-hidden="true"></i><span>${escape(message)}</span><button class="btn-text btn-icon" aria-label="${escape(t('action.dismiss'))}"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button><span class="notification-progress" aria-hidden="true"></span>`;
+  const duration = Math.min(60, Math.max(1, Number(ui.settings.toastDuration) || 5)) * 1000;
+  let remaining = duration, last = performance.now(), paused = false, closing = false;
+  const progress = notice.querySelector('.notification-progress');
+  // Keep countdown motion functional independently of decorative animation preferences.
+  const close = () => {
+    if (closing) return; closing = true; clearInterval(timer); notice.classList.add('leaving');
+    setTimeout(() => notice.remove(), ui.settings.animations && !matchMedia('(prefers-reduced-motion: reduce)').matches ? 180 : 0);
+  };
+  const advance = () => {
+    const now = performance.now(); if (!paused) remaining -= now - last; last = now;
+    progress.style.transform = `scaleX(${Math.max(0, remaining) / duration})`;
+    if (remaining <= 0) close();
+  };
+  const updatePause = () => { advance(); paused = notice.matches(':hover') || notice.contains(document.activeElement); };
+  const timer = setInterval(() => { if (notice.isConnected) advance(); else clearInterval(timer); }, 50);
+  for (const event of ['mouseenter', 'mouseleave', 'focusin']) notice.addEventListener(event, updatePause);
+  notice.addEventListener('focusout', () => queueMicrotask(updatePause));
+  notice.querySelector('button').addEventListener('click', close);
+  $('#notifications').append(notice); placeNotifications();
   return notice;
 }
 

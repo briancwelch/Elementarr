@@ -22,6 +22,10 @@ TMDB's developer API is [free for non-commercial use with attribution](https://d
 - Radarr and Sonarr collections, with confirmed add actions and optional download searches.
 - Movie-history removal that stays removed after syncing, with restoration available in Administration. Plex keeps its own records.
 - Windows tray controls to open, start, stop, restart, or exit Elementarr.
+- Upcoming episodes from Sonarr and separate affected movie/TV history views.
+- Live search, a built-in changelog, and version information in the navigation footer.
+- Appearance controls for typography, themed scrollbars, badge corners, and timed notifications.
+- Plex profile pictures and a confirmation before signing out.
 - Configurable hostname, port, and LAN access.
 
 ## Automatic updates

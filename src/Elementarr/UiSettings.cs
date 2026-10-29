@@ -13,6 +13,15 @@ public sealed record UiSettings
     public bool GoogleFonts { get; init; }
     public int FontSize { get; init; } = 14;
     public int HeadingSize { get; init; } = 36;
+    public int NavigationFontScale { get; init; } = 100;
+    public int CardFontScale { get; init; } = 100;
+    public int DetailFontScale { get; init; } = 100;
+    public int ControlFontScale { get; init; } = 100;
+    public int CaptionFontScale { get; init; } = 100;
+    public int BadgeFontScale { get; init; } = 100;
+    public int ToastFontScale { get; init; } = 100;
+    public int ToastDuration { get; init; } = 5;
+    public int BadgeRadius { get; init; } = 4;
     public int NavWidth { get; init; } = 224;
     public int ContentWidth { get; init; } = 2200;
     public int CornerRadius { get; init; } = 9;

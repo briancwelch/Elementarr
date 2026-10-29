@@ -28,6 +28,9 @@ public sealed partial class UiService
         if (value.FontSize is < 11 or > 22 || value.HeadingSize is < 24 or > 60 || value.NavWidth is < 180 or > 300
             || value.ContentWidth is < 1000 or > 3000 || value.CornerRadius is < 0 or > 24 || value.GridGap is < 8 or > 40
             || value.PosterSize is < 120 or > 320 || value.TimelineZoom is < 130 or > 360
+            || value.BadgeRadius is < 0 or > 24 || value.ToastDuration is < 1 or > 60
+            || new[] { value.NavigationFontScale, value.CardFontScale, value.DetailFontScale, value.ControlFontScale,
+                value.CaptionFontScale, value.BadgeFontScale, value.ToastFontScale }.Any(x => x is < 75 or > 175)
             || value.PageSize is not (10 or 25 or 50 or 100))
             throw new ArgumentException("An appearance setting is outside its supported range.");
         if (value.Texts is null || value.Texts.Count > 1000 || value.Texts.Any(x => !TextKey().IsMatch(x.Key)

@@ -33,3 +33,11 @@ In Watched Movie History or Affected history, choose **Remove movie from history
 Develop and validate on Carbon using local Docker containers before building or pushing Windows releases. `scripts/Test-Local.ps1` runs Windows and Docker fixture checks and records a fingerprint of validated source. `scripts/Build-Windows.ps1` refuses changed or unvalidated source and requires the original private publisher key. The signing key stays in ignored `.local` storage and must be privately backed up; replacing it breaks trust for existing installations.
 
 Full installer ZIPs contain app, tray, updater, licenses, and service configuration. The separate update ZIP contains only service/web application files. Release JSON/signature/checksums accompany public GitHub releases. No application data or access tokens enter GitHub or release packages. Windows installers are currently not Authenticode-signed; update payloads have independent publisher-signature verification.
+
+## Appearance and navigation
+
+The sidebar groups movie/TV discovery and personal collections separately. Changelog and the version footer identify the running release. Episodes Airing Soon uses your Sonarr calendar for the next fourteen days, with browser-local air times; Affected TV History contains episodes without usable parent-series IDs.
+
+Administration > Appearance provides a global text size and category percentages for navigation, cards/timelines, details/dialogs, forms/controls, captions, badges, and notifications. Badge corners default to 4 px. All scrollbars and range sliders use the appearance colors. Notifications default to five seconds, show a bottom countdown, pause while hovered or focused, and then fade; the duration can be set from 1 to 60 seconds.
+
+The account footer displays the Plex username first and the owner role beneath it. Profile pictures are proxied from verified HTTPS Plex image hosts, with a fallback if unavailable. Sign out opens a branded confirmation and leaves the service running.

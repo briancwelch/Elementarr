@@ -14,7 +14,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File tests/Test-Windows.ps1
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/Publish-Release.ps1
 ```
 
-The build gate binds validation to a source fingerprint. Changed code must pass the Carbon Windows/Docker checks again. Keep the original `.local/release-signing.pk8` key in private backup; installed clients trust its public key. Never commit credentials, data, encryption keys, or release signing material. The repository and signed release assets must be public for anonymous updates.
+The build gate runs the .NET integration suite, frontend DOM regressions (Node.js 24 or newer with npm), and the local Docker checks, then binds validation to a source fingerprint. Frontend test dependencies are restored with npm ci and are never included in Windows application packages. Changed code must pass the Carbon Windows/Docker checks again. Keep the original `.local/release-signing.pk8` key in private backup; installed clients trust its public key. Never commit credentials, data, encryption keys, or release signing material. The repository and signed release assets must be public for anonymous updates.
 
 Installed services download stable releases anonymously; users do not need a GitHub account or token. Automatic checks and installation are enabled by default, with checks after startup and every six hours. Application files and private data are backed up before applying newer signed payloads. See [Windows installation and updates](WINDOWS.md).
 

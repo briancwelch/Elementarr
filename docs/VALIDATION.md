@@ -1,3 +1,12 @@
+# Elementarr 0.5.0 interface validation - October 29, 2026
+
+- **157 integration checks passed on Windows and in Docker** and cover new appearance defaults/persistence/bounds, authenticated release identity, bounded credential-free Plex avatar proxying and safe Plex-only redirects, fourteen-day Sonarr episode filtering/order/search, separate affected-TV-history browsing, and the shared branding assets.
+- **Seven frontend DOM tests** execute production UI modules against a loopback fixture server. They cover grouped navigation/changelog/version, debounced AJAX searching, stale-response rejection and focus retention, cancel/confirm logout, escaped countdown notifications with keyboard pause and automatic dismissal, upcoming/affected TV navigation, and the new appearance controls. Native drawer/dialog/popover primitives are substituted in these DOM tests; they are not a visual rendering claim.
+- Read-only live checks using the approved ignored QA configuration retrieved the actual Plex profile PNG through its asset redirect and seven upcoming Sonarr episodes with valid air times. No live collection addition, download search, or watch-history change was used for testing.
+- The new atom-and-clapperboard vector was rendered and visually inspected as the shared application/favicon/Windows icon. All fixed app text sizes now derive from rem/base typography and category scales; badges use the shared radius setting.
+- The self-contained Windows payload passed fresh Plex-only startup, packaged asset serving, and shutdown/identity checks. The actual signed 0.5.0 ZIP passed signature, hash/size, safe extraction, logo, and favicon verification.
+- Browser automation was unavailable, and native Edge remained minimized, so this revision's full browser rendering was not visually verified.
+
 # Elementarr 0.4.1 public-update validation - October 29, 2026
 
 - **137 integration checks passed on Carbon Windows and in Docker**, including a complete anonymous release/asset flow using real published signed metadata, a GitHub storage redirect, legacy token removal with preferences preserved, and safe rate-limit handling.

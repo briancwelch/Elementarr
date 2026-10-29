@@ -9,7 +9,9 @@ let poll = 0;
 const colors = ['canvas', 'panel', 'accent', 'ink', 'muted', 'border'];
 const fonts = ['bodyFont', 'headingFont'];
 const ranges = { fontSize: [11, 22], headingSize: [24, 60], navWidth: [180, 300], contentWidth: [1000, 3000],
-  cornerRadius: [0, 24], gridGap: [8, 40], posterSize: [120, 320], timelineZoom: [130, 360] };
+  cornerRadius: [0, 24], badgeRadius: [0, 24], toastDuration: [1, 60], gridGap: [8, 40], posterSize: [120, 320], timelineZoom: [130, 360],
+  navigationFontScale: [75, 175], cardFontScale: [75, 175], detailFontScale: [75, 175], controlFontScale: [75, 175],
+  captionFontScale: [75, 175], badgeFontScale: [75, 175], toastFontScale: [75, 175] };
 const toggles = ['googleFonts', 'showPosters', 'showBackdrops', 'showRatings', 'showReasons', 'showFooter', 'animations'];
 const wordSections = {
   ui: ['brand', 'nav', 'search', 'stats', 'browse', 'heading', 'common', 'footer', 'sync', 'setup'],
@@ -23,15 +25,22 @@ const wordSections = {
 /** Builds editable appearance controls from safe named settings rather than allowing arbitrary CSS or scripts. */
 export function renderAdmin(settings = ui.settings) {
   wordDraft = { ...(settings.texts || {}) };
-  $('#appearance-fields').innerHTML = colors.map((key) => `<label class="appearance-color"><span>${escape(t('admin.' + key))}</span><input type="color" name="${key}" value="${escape(settings[key])}"><code>${escape(settings[key])}</code></label>`).join('')
-    + fonts.map((key) => `<label class="appearance-field"><span>${escape(t('admin.' + key))}</span><input class="form-control" name="${key}" list="font-families" maxlength="80" pattern="[A-Za-z0-9][A-Za-z0-9 -]{0,79}" required value="${escape(settings[key])}"></label>`).join('')
-    + Object.entries(ranges).map(([key, [min, max]]) => `<label class="appearance-field"><span>${escape(t('admin.' + key))}</span><div class="range-value"><input type="range" name="${key}" min="${min}" max="${max}" value="${settings[key]}"><output>${settings[key]} px</output></div></label>`).join('')
+  const colorFields = colors.map((key) => `<label class="appearance-color"><span>${escape(t('admin.' + key))}</span><input type="color" name="${key}" value="${escape(settings[key])}"><code>${escape(settings[key])}</code></label>`).join('');
+  const fontFields = fonts.map((key) => `<label class="appearance-field"><span>${escape(t('admin.' + key))}</span><input class="form-control" name="${key}" list="font-families" maxlength="80" pattern="[A-Za-z0-9][A-Za-z0-9 -]{0,79}" required value="${escape(settings[key])}"></label>`).join('');
+  const rangeFields = (typography) => Object.entries(ranges).filter(([key]) => (key.endsWith('FontScale') || ['fontSize', 'headingSize'].includes(key)) === typography)
+    .map(([key, [min, max]]) => `<label class="appearance-field"><span>${escape(t('admin.' + key))}</span><div class="range-value"><input type="range" name="${key}" min="${min}" max="${max}" value="${settings[key]}"><output>${settings[key]} ${rangeUnit(key)}</output></div></label>`).join('');
+  $('#appearance-fields').innerHTML = `<fieldset class="appearance-category"><legend>${escape(t('admin.colorsTitle'))}</legend><div class="appearance-group-grid">${colorFields}</div></fieldset>`
+    + `<fieldset class="appearance-category"><legend>${escape(t('admin.typographyTitle'))}</legend><p class="field-help">${escape(t('admin.typographyHelp'))}</p><div class="appearance-group-grid">${fontFields}${rangeFields(true)}</div></fieldset>`
+    + `<fieldset class="appearance-category"><legend>${escape(t('admin.layoutTitle'))}</legend><div class="appearance-group-grid">${rangeFields(false)}`
     + `<label class="appearance-field"><span>${escape(t('admin.pageSize'))}</span><select class="form-control" name="pageSize">${[10, 25, 50, 100].map((size) => `<option ${settings.pageSize === size ? 'selected' : ''}>${size}</option>`).join('')}</select></label>`
-    + toggles.map((key) => `<label class="toggle-label appearance-toggle"><input type="checkbox" name="${key}" class="check" ${settings[key] ? 'checked' : ''}><span>${escape(t('admin.' + key))}</span></label>`).join('');
-  $('#appearance-fields').querySelectorAll('input[type="range"]').forEach((input) => input.addEventListener('input', () => { input.nextElementSibling.textContent = input.value + ' px'; }));
+    + toggles.map((key) => `<label class="toggle-label appearance-toggle"><input type="checkbox" name="${key}" class="check" ${settings[key] ? 'checked' : ''}><span>${escape(t('admin.' + key))}</span></label>`).join('') + '</div></fieldset>';
+  $('#appearance-fields').querySelectorAll('input[type="range"]').forEach((input) => input.addEventListener('input', () => { input.nextElementSibling.textContent = input.value + ' ' + rangeUnit(input.name); }));
   $('#appearance-fields').querySelectorAll('input[type="color"]').forEach((input) => input.addEventListener('input', () => { input.nextElementSibling.textContent = input.value; }));
   renderWording();
 }
+
+/** Labels percentage, duration, and pixel controls in their actual units. */
+function rangeUnit(key) { return key.endsWith('FontScale') ? '%' : key === 'toastDuration' ? 's' : 'px'; }
 
 /** Assigns wording to a task-based section, keeping unfamiliar keys available under Other. */
 function sectionForWord(key) {

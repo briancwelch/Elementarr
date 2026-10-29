@@ -94,6 +94,7 @@ public static class AppHost
         builder.Services.AddSingleton<StateStore>();
         builder.Services.AddSingleton<MediaApi>();
         builder.Services.AddSingleton<PlexService>();
+        builder.Services.AddSingleton<PlexAvatarService>();
         builder.Services.AddSingleton<TvService>();
         builder.Services.AddSingleton<TvRefreshWorker>();
         builder.Services.AddHostedService(provider => provider.GetRequiredService<TvRefreshWorker>());
@@ -153,6 +154,12 @@ public static class AppHost
         var api = app.MapGroup("/api").RequireAuthorization();
         api.MapPost("/logout", (Delegate)LogoutAsync);
         api.MapGet("/settings", Settings);
+        api.MapGet("/changelog", () => Results.Ok(new { version = UpdateService.CurrentVersion, releases = ReleaseNotes.All }));
+        api.MapGet("/plex/avatar", async (PlexAvatarService avatars, CancellationToken ct) =>
+        {
+            var value = await avatars.GetAsync(ct);
+            return value is { } image ? (IResult)Results.File(image.Bytes, image.ContentType) : Results.NotFound();
+        });
         api.MapGet("/updates", (UpdateService updates) => Results.Ok(new { updates.Status, updates.CanInstall,
             enabled = updates.Preferences.Enabled, autoInstall = updates.Preferences.AutoInstall,
             repository = Elementarr.UpdateCore.ReleaseTrust.Repository }));
@@ -235,7 +242,7 @@ public static class AppHost
     /// <summary>Returns an antiforgery token bound to the current anonymous or authenticated browser session.</summary>
     private static IResult Session(HttpContext context, IAntiforgery antiforgery, StateStore store) => Results.Ok(new
     { authenticated = context.User.Identity?.IsAuthenticated == true, csrfToken = antiforgery.GetAndStoreTokens(context).RequestToken,
-        plexSignInAvailable = true, firstRun = store.Settings.PlexOwnerId.Length == 0 });
+        plexSignInAvailable = true, firstRun = store.Settings.PlexOwnerId.Length == 0, version = UpdateService.CurrentVersion });
 
     /// <summary>Starts a server-managed Plex authorization without exposing PIN tokens or accepting arbitrary callback URLs.</summary>
     private static async Task<IResult> PlexStartAsync(HttpContext context, PlexAuthRequest request, PlexService plex, CancellationToken ct) =>

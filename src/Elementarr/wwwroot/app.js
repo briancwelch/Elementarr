@@ -17,10 +17,13 @@ const drawers = { filters: new Drawer($('#filter-drawer'), { scroll: true, backd
   movie: new Drawer($('#movie-drawer')), match: new Drawer($('#match-drawer')) };
 const browseViews = ['for-you', 'trending', 'upcoming', 'top-rated', 'library', 'history', 'issues', ...tvViews];
 const viewFilters = {};
+let contentRequest;
+let searchTimer;
 
 /** Refreshes the browser-bound CSRF token and switches between authenticated and Plex-only sign-in views. */
 async function session() {
   const result = await api('session'); app.csrf = result.csrfToken;
+  $('#app-version').textContent = 'v' + result.version;
   $('#plex-login').disabled = !result.plexSignInAvailable; $('#plex-login-help').hidden = !result.firstRun;
   $('#login-view').hidden = result.authenticated; $('#app-view').hidden = !result.authenticated;
   if (!result.authenticated) { Object.values(drawers).forEach((drawer) => { void drawer.hide(); }); $('#plex-login').focus(); }
@@ -31,6 +34,7 @@ async function session() {
 async function loadSettings() {
   app.settings = await api('settings'); const settings = app.settings;
   await loadUpdates();
+  if (!$('#account-avatar').getAttribute('src')) $('#account-avatar').src = '/api/plex/avatar';
   const server = await api('server');
   $('#server-port').value = server.settings.port; $('#server-host').value = server.settings.hostName || 'localhost'; $('#server-bind').value = server.settings.bindAddress;
   for (const id of ['server-port', 'server-host', 'server-bind', 'server-save']) $('#' + id).disabled = server.container;
@@ -82,6 +86,9 @@ async function loadState() {
   $('#stat-watched').textContent = tv ? (state.tvHistorySyncedAt ? state.tvHistoryCount.toLocaleString() : t('status.na')) : state.historySyncedAt ? state.watchedCount.toLocaleString() : t('status.na');
   $('[data-text="stats.watched"]').textContent = tv ? 'episodes watched' : t('stats.watched');
   $('#nav-count').textContent = state.librarySyncedAt ? state.libraryCount.toLocaleString() : t('status.na');
+  $('#nav-count').hidden = !state.librarySyncedAt;
+  $('#tv-nav-count').textContent = state.tvLibraryCount.toLocaleString(); $('#tv-nav-count').hidden = !state.tvLibrarySyncedAt;
+  $('#tv-issue-count').textContent = state.tvUnmatchedCount.toLocaleString(); $('#tv-issue-count').hidden = !state.tvUnmatchedCount;
   $('#issue-count').textContent = state.unmatchedCount.toLocaleString(); $('#issue-count').hidden = !state.unmatchedCount;
   $('#account-name').textContent = state.username; $('#server-address').textContent = location.host;
   const stamp = (date) => date ? new Date(date).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : t('status.notSynced');
@@ -99,8 +106,9 @@ async function loadState() {
   document.querySelectorAll('[data-sync="radarr"]').forEach((button) => { button.disabled = !app.settings?.hasRadarrKey; });
   document.querySelectorAll('[data-sync="history"]').forEach((button) => { button.disabled = !(app.settings?.hasPlexToken || (app.settings?.tautulliEnabled && app.settings?.hasTautulliKey)); });
   if (tv && state.tvUnmatchedCount) {
-    const warning = document.createElement('p'); warning.className = 'source-warning';
-    warning.textContent = `${state.tvUnmatchedCount} TV episode watches have no series identifier. They remain visible in Watched TV History.`; $('#warnings').append(warning);
+    const warning = document.createElement('div'); warning.className = 'source-warning';
+    warning.innerHTML = `<i class="fa-solid fa-link-slash" aria-hidden="true"></i><span>${state.tvUnmatchedCount} TV episode watches need a series identifier.</span><button class="btn-text">View Affected TV History</button>`;
+    warning.querySelector('button').addEventListener('click', () => navigate('tv-issues')); $('#warnings').append(warning);
   }
   document.querySelectorAll('[data-sync="sonarr"]').forEach((button) => { button.disabled = !app.settings?.hasSonarrKey; });
   document.querySelectorAll('[data-sync="tv-history"]').forEach((button) => { button.disabled = !app.settings?.hasPlexToken || !app.settings?.plexServerId; });
@@ -111,7 +119,7 @@ async function loadState() {
 function initPreferences() {
   const stored = readPreferences(); const settings = ui.settings;
   const bounded = (value, fallback, min, max) => Math.min(max, Math.max(min, Number(value) || fallback));
-  app.preferences = { collapsed: typeof stored.collapsed === 'boolean' ? stored.collapsed : window.innerWidth < 900, layout: stored.layout === 'list' ? 'list' : 'grid',
+  app.preferences = { navGroups: stored.navGroups && typeof stored.navGroups === 'object' ? stored.navGroups : {}, collapsed: typeof stored.collapsed === 'boolean' ? stored.collapsed : window.innerWidth < 900, layout: stored.layout === 'list' ? 'list' : 'grid',
     pageSize: [10, 25, 50, 100].includes(Number(stored.pageSize)) ? Number(stored.pageSize) : settings.pageSize,
     posterSize: bounded(stored.posterSize, settings.posterSize, 120, 320), timelineZoom: bounded(stored.timelineZoom, settings.timelineZoom, 130, 360),
     timelinePosters: typeof stored.timelinePosters === 'boolean' ? stored.timelinePosters : settings.showPosters,
@@ -124,6 +132,7 @@ function initPreferences() {
 function applyPreferences() {
   const preferences = app.preferences;
   document.body.classList.toggle('nav-collapsed', preferences.collapsed);
+  document.querySelectorAll('[data-nav-group]').forEach((group) => { group.open = preferences.collapsed || preferences.navGroups[group.dataset.navGroup] !== false; group.querySelector('summary').hidden = preferences.collapsed; });
   document.documentElement.style.setProperty('--poster-size', preferences.posterSize + 'px');
   $('#collapse-nav').setAttribute('aria-expanded', String(!preferences.collapsed));
   $('#collapse-nav').setAttribute('aria-label', t(preferences.collapsed ? 'action.expand' : 'action.collapse'));
@@ -136,7 +145,8 @@ function applyPreferences() {
 
 /** Changes main navigation while keeping each list's own filters, sorting, and independent AJAX pagination. */
 async function navigate(view) {
-  if (![...browseViews, 'settings', 'admin'].includes(view)) return;
+  if (![...browseViews, 'settings', 'admin', 'changelog'].includes(view)) return;
+  clearTimeout(searchTimer); contentRequest?.abort(); app.sequence++;
   if (app.navigated && browseViews.includes(app.view)) viewFilters[app.view] = { ...app.filters };
   app.navigated = true;
   app.view = view; app.page = 1; app.query = ''; $('#search').value = '';
@@ -145,17 +155,17 @@ async function navigate(view) {
     : ['history', 'issues'].includes(view) ? { sort: 'watched', order: 'desc' } : { sort: 'default', order: 'desc', owned: 'no', watched: 'no' });
   document.querySelectorAll('.nav-item').forEach((button) => {
     const active = button.dataset.view === view; button.classList.toggle('active', active);
-    if (active) button.setAttribute('aria-current', 'page'); else button.removeAttribute('aria-current');
+    if (active) { button.setAttribute('aria-current', 'page'); const group = button.closest('details'); if (group) group.open = true; } else button.removeAttribute('aria-current');
   });
   updateHeading(); buildSortOptions(); writeFilters();
-  const browse = browseViews.includes(view); const timeline = ['history', 'issues', 'tv-history'].includes(view);
-  $('#settings').hidden = view !== 'settings'; $('#admin').hidden = view !== 'admin';
+  const browse = browseViews.includes(view); const timeline = ['history', 'issues', 'tv-history', 'tv-issues'].includes(view);
+  $('#settings').hidden = view !== 'settings'; $('#admin').hidden = view !== 'admin'; $('#changelog').hidden = view !== 'changelog';
   $('#content').hidden = !browse; $('#browse-toolbar').hidden = !browse; $('#open-filters').hidden = !browse || tvViews.includes(view);
   for (const id of ['sort-by', 'sort-order']) $('#' + id).closest('label').hidden = tvViews.includes(view);
   document.querySelectorAll('.tv-control').forEach((control) => { control.hidden = !tvViews.includes(view); });
-  $('#tv-sort').closest('label').hidden = !tvViews.includes(view) || view === 'tv-history';
-  for (const id of ['timeline-thumbs', 'timeline-ratings']) $('#' + id).closest('label').hidden = view === 'tv-history';
-  const remoteTv = tvViews.includes(view) && !['tv-history', 'tv-library'].includes(view);
+  $('#tv-sort').closest('label').hidden = !tvViews.includes(view) || ['tv-history', 'tv-issues', 'tv-upcoming'].includes(view);
+  for (const id of ['timeline-thumbs', 'timeline-ratings']) $('#' + id).closest('label').hidden = ['tv-history', 'tv-issues'].includes(view);
+  const remoteTv = tvViews.includes(view) && !['tv-history', 'tv-issues', 'tv-library', 'tv-upcoming'].includes(view);
   $('#page-size').disabled = remoteTv;
   const providerOption = $('#page-size option[value="20"]'); if (providerOption) providerOption.remove();
   if (remoteTv) $('#page-size').add(new Option('20 (provider)', '20'));
@@ -166,7 +176,27 @@ async function navigate(view) {
   $('#pagination').hidden = true; $('#feed-notice').textContent = ''; $('#result-count').textContent = '';
   if (!browse) { app.sequence++; await drawers.filters.hide(); }
   await loadState();
-  if (view === 'admin') renderAdmin(); else if (browse) await loadContent();
+  if (view === 'admin') renderAdmin(); else if (view === 'changelog') await loadChangelog(); else if (browse) await loadContent();
+}
+
+/** Debounces typing and immediately invalidates older results, including requests that complete before the next search starts. */
+function queueSearch() {
+  clearTimeout(searchTimer); contentRequest?.abort(); app.sequence++;
+  searchTimer = setTimeout(() => { void searchCurrentView(); }, 300);
+}
+
+/** Searches the current view without a page reload or losing keyboard focus. */
+async function searchCurrentView() {
+  if (!browseViews.includes(app.view)) return;
+  app.query = $('#search').value.trim(); app.page = 1; await loadContent({ live: true });
+}
+
+/** Displays bundled release notes offline without trusting upstream HTML or consuming GitHub API requests. */
+async function loadChangelog() {
+  try {
+    const data = await api('changelog'); if (app.view !== 'changelog') return;
+    $('#changelog').innerHTML = data.releases.map((release) => `<article class="release-note connection-card"><div class="release-heading"><h2>${escape(release.title)}</h2><span class="badge badge-subtle theme-primary">v${escape(release.version)}</span><time datetime="${escape(release.date)}">${escape(new Date(release.date + 'T12:00:00').toLocaleDateString())}</time></div><ul>${release.changes.map((change) => `<li>${escape(change)}</li>`).join('')}</ul></article>`).join('');
+  } catch (error) { $('#changelog').textContent = error.message; }
 }
 
 /** Rebuilds configurable page headings without treating user wording as HTML. */
@@ -182,28 +212,32 @@ function empty(title, description, retry = false) {
 }
 
 /** Loads filtered and sorted pages through AJAX, discarding late responses from prior views. */
-async function loadContent() {
+async function loadContent({ live = false } = {}) {
   if (!browseViews.includes(app.view)) return;
+  contentRequest?.abort(); contentRequest = new AbortController();
+  const signal = contentRequest.signal;
   const sequence = ++app.sequence; $('#content').setAttribute('aria-busy', 'true'); $('#pagination').hidden = true;
-  empty(t('status.loading'), t('status.fetching'));
+  if (!live) empty(t('status.loading'), t('status.fetching'));
+  $('#search-status').textContent = 'Searching...';
   try {
-    if (!app.settings.hasTmdbToken && !['library', 'history', 'issues', 'tv-library', 'tv-history'].includes(app.view)) { empty(t('status.noTmdb'), t('status.noTmdbHelp')); return; }
+    if (!app.settings.hasTmdbToken && !['library', 'history', 'issues', 'tv-library', 'tv-history', 'tv-issues', 'tv-upcoming'].includes(app.view)) { empty(t('status.noTmdb'), t('status.noTmdbHelp')); return; }
     const parameters = new URLSearchParams({ ...app.filters, view: app.view, page: app.page, pageSize: app.preferences.pageSize,
       query: app.query, utcOffset: -new Date().getTimezoneOffset() });
     const television = tvViews.includes(app.view);
-    const data = television ? await loadTvPage() : await api('browse?' + parameters); if (sequence !== app.sequence) return;
+    const data = television ? await loadTvPage(signal) : await api('browse?' + parameters, undefined, { signal }); if (sequence !== app.sequence) return;
     app.pageData = data;
-    const rows = television ? (app.view === 'tv-history' ? data.plays : data.series) : ['history', 'issues'].includes(app.view) ? data.plays : data.movies;
+    const rows = television ? (['tv-history', 'tv-issues'].includes(app.view) ? data.plays : data.series) : ['history', 'issues'].includes(app.view) ? data.plays : data.movies;
     if (!rows.length) empty(television ? 'No matching TV results.' : t('status.noResults'), television ? 'Sync your TV sources or search for another series.' : data.incomplete ? t('status.remoteSearch') : t('status.noResultsHelp'));
-    else if (television) { if (app.view === 'tv-history') renderTvHistory(rows); else renderTvSeries(rows); }
+    else if (television) { if (['tv-history', 'tv-issues'].includes(app.view)) renderTvHistory(rows); else renderTvSeries(rows); }
     else if (['history', 'issues'].includes(app.view)) renderHistory(rows, openMovie, openMatch, removeMovieHistory); else renderMovies(rows, openMovie);
     $('#result-count').textContent = data.totalResults.toLocaleString();
+    $('#search-status').textContent = `${data.totalResults.toLocaleString()} results${app.query ? ' for ' + app.query : ''}.`;
     $('#feed-notice').textContent = data.notice ? television ? data.notice : t(data.notice === 'metadata' ? 'status.localFilterHelp' : 'status.remoteSearch') : app.query ? t('status.searchResults', { query: app.query }) : '';
     $('#pagination').hidden = data.totalPages <= 1 && !data.hasMore && app.page === 1;
     $('#page-number').textContent = t(data.hasMore && data.notice === 'remote' ? 'status.pageMore' : 'status.page', { page: data.page, pages: data.totalPages, count: data.totalResults.toLocaleString() });
     $('#previous').disabled = app.page <= 1; $('#next').disabled = !data.hasMore;
     $('#next span').textContent = t(data.incomplete ? 'action.keepSearching' : 'action.next');
-  } catch (error) { if (sequence === app.sequence) empty(t('status.errorTitle'), error.message, true); }
+  } catch (error) { if (error.name !== 'AbortError' && sequence === app.sequence) { empty(t('status.errorTitle'), error.message, true); $('#search-status').textContent = error.message; } }
   finally { if (sequence === app.sequence) $('#content').removeAttribute('aria-busy'); }
 }
 
@@ -244,13 +278,13 @@ async function watchCommand(command, title, notice) {
   for (let attempt = 0; attempt < 10; attempt++) {
     if (['completed', 'failed', 'aborted'].includes(command.status.toLowerCase())) break;
     await new Promise((resolve) => setTimeout(resolve, 3000));
-    if ($('#app-view').hidden || !notice.isConnected) return;
+    if ($('#app-view').hidden) return;
     try { command = await api(`radarr/commands/${command.commandId}`); }
     catch { notice.querySelector('span').textContent = t('status.commandUnknown'); return; }
     notice.querySelector('span').textContent = t('status.searchRunning', { title, status: label(command.status) });
   }
   if (['failed', 'aborted'].includes(command.status.toLowerCase())) { notice.classList.add('error'); notice.setAttribute('role', 'alert'); }
-  else if (command.status.toLowerCase() === 'completed') setTimeout(() => notice.remove(), 7500);
+  if (!notice.isConnected && ['completed', 'failed', 'aborted'].includes(command.status.toLowerCase())) notify(t('status.searchRunning', { title, status: label(command.status) }), command.status.toLowerCase() !== 'completed');
 }
 
 /** Starts a manual correction flow for a specific unmatched source item. */
@@ -320,7 +354,7 @@ async function synchronize(button) {
 
 /** Loads the genre taxonomy for the filter controls. */
 async function loadFilterOptions() {
-  const result = await api('filter-options'); buildFilters(result.genres);
+  const result = await api('filter-options'); app.filterOptions = result; buildFilters(result.genres);
 }
 
 /** Wires authenticated actions, list sorting, AJAX pagination, timeline preferences, and responsive navigation. */
@@ -332,10 +366,24 @@ function bindEvents() {
       } catch (error) { notify(error.message, true); }
     });
   });
-  $('#logout').addEventListener('click', async () => { try { app.plexFlow++; app.sequence++; await api('logout', {}); await session(); } catch (error) { notify(error.message, true); } });
+  $('#logout').addEventListener('click', () => { $('#logout-dialog').showModal(); $('#cancel-logout').focus(); placeNotifications(); });
+  $('#cancel-logout').addEventListener('click', () => $('#logout-dialog').close());
+  $('#logout-dialog').addEventListener('close', placeNotifications);
+  $('#confirm-logout').addEventListener('click', (event) => busy(event.currentTarget, async () => {
+    try { app.plexFlow++; app.sequence++; clearTimeout(searchTimer); contentRequest?.abort(); await api('logout', {}); $('#logout-dialog').close(); $('#account-avatar').removeAttribute('src'); await session(); }
+    catch (error) { notify(error.message, true); }
+  }));
+  $('#account-avatar').addEventListener('load', () => { $('#account-avatar').hidden = false; $('#account-avatar-fallback').hidden = true; });
+  $('#account-avatar').addEventListener('error', () => { $('#account-avatar').hidden = true; $('#account-avatar-fallback').hidden = false; });
+  document.querySelectorAll('[data-nav-group]').forEach((group) => group.addEventListener('toggle', () => {
+    if (app.preferences.collapsed || !app.preferences.navGroups || app.preferences.navGroups[group.dataset.navGroup] === group.open) return;
+    app.preferences.navGroups[group.dataset.navGroup] = group.open; savePreferences(app.preferences);
+  }));
   document.querySelectorAll('[data-view]').forEach((button) => button.addEventListener('click', () => navigate(button.dataset.view)));
   $('#collapse-nav').addEventListener('click', () => { app.preferences.collapsed = !app.preferences.collapsed; applyPreferences(); savePreferences(app.preferences); });
-  $('#search-form').addEventListener('submit', async (event) => { event.preventDefault(); app.query = $('#search').value.trim(); app.page = 1; await loadContent(); });
+  $('#search-form').addEventListener('submit', (event) => { event.preventDefault(); clearTimeout(searchTimer); void searchCurrentView(); });
+  $('#search').addEventListener('input', (event) => { if (!event.isComposing) queueSearch(); });
+  $('#search').addEventListener('compositionend', queueSearch);
   $('#open-filters').addEventListener('click', () => { writeFilters(); void drawers.filters.toggle(); });
   $('#filter-drawer').addEventListener('show.bs.drawer', () => { document.body.classList.add('filters-open'); $('#open-filters').setAttribute('aria-expanded', 'true'); });
   $('#filter-drawer').addEventListener('hidden.bs.drawer', () => { document.body.classList.remove('filters-open'); $('#open-filters').setAttribute('aria-expanded', 'false'); });
@@ -345,7 +393,7 @@ function bindEvents() {
   for (const id of ['sort-by', 'sort-order']) $('#' + id).addEventListener('change', async () => { app.filters.sort = $('#sort-by').value; app.filters.order = $('#sort-order').value; app.page = 1; await loadContent(); });
   $('#page-size').addEventListener('change', async () => { app.preferences.pageSize = Number($('#page-size').value); app.page = 1; savePreferences(app.preferences); await loadContent(); });
   $('#poster-size').addEventListener('input', () => { app.preferences.posterSize = Number($('#poster-size').value); applyPreferences(); savePreferences(app.preferences); });
-  for (const mode of ['grid', 'list']) $('#' + mode + '-mode').addEventListener('click', () => { app.preferences.layout = mode; applyPreferences(); savePreferences(app.preferences); if (app.pageData) { if (tvViews.includes(app.view)) { if (app.view !== 'tv-history') renderTvSeries(app.pageData.series); } else if (!['history', 'issues'].includes(app.view)) renderMovies(app.pageData.movies, openMovie); } });
+  for (const mode of ['grid', 'list']) $('#' + mode + '-mode').addEventListener('click', () => { app.preferences.layout = mode; applyPreferences(); savePreferences(app.preferences); if (app.pageData) { if (tvViews.includes(app.view)) { if (!['tv-history', 'tv-issues'].includes(app.view)) renderTvSeries(app.pageData.series); } else if (!['history', 'issues'].includes(app.view)) renderMovies(app.pageData.movies, openMovie); } });
   $('#previous').addEventListener('click', async () => { if (app.page > 1) { app.page--; await loadContent(); } });
   $('#next').addEventListener('click', async () => { if (!app.pageData?.incomplete) app.page++; await loadContent(); });
   for (const direction of ['back', 'forward']) $('#timeline-' + direction).addEventListener('click', () => { const rail = $('#timeline-rail'); rail?.scrollBy({ left: (direction === 'forward' ? 1 : -1) * rail.clientWidth * .8, behavior: 'smooth' }); });
@@ -389,7 +437,7 @@ function bindEvents() {
   $('#match-form').addEventListener('submit', async (event) => { event.preventDefault(); await busy(event.submitter, searchMatches); });
   document.addEventListener('elementarr:filters-applied', () => { app.page = 1; void loadContent(); });
   document.addEventListener('elementarr:session-expired', () => { void session(); });
-  document.addEventListener('elementarr:appearance-changed', () => { applyTexts(); updateHeading(); buildSortOptions(); void loadFilterOptions(); applyPreferences(); });
+  document.addEventListener('elementarr:appearance-changed', () => { applyTexts(); updateHeading(); buildSortOptions(); if (app.filterOptions) buildFilters(app.filterOptions.genres); applyPreferences(); });
   document.addEventListener('elementarr:rating-imported', () => { void loadFilterOptions(); });
   for (const id of ['tv-sort', 'tv-order']) $('#' + id).addEventListener('change', async () => { app.page = 1; await loadContent(); });
   bindTv(async (settingsChanged) => { if (settingsChanged) await loadSettings(); await loadState(); if (browseViews.includes(app.view)) await loadContent(); });
