@@ -5,6 +5,8 @@
 - Read-only live checks using the approved ignored QA configuration retrieved the actual Plex profile PNG through its asset redirect and seven upcoming Sonarr episodes with valid air times. No live collection addition, download search, or watch-history change was used for testing.
 - The new atom-and-clapperboard vector was rendered and visually inspected as the shared application/favicon/Windows icon. All fixed app text sizes now derive from rem/base typography and category scales; badges use the shared radius setting.
 - The self-contained Windows payload passed fresh Plex-only startup, packaged asset serving, and shutdown/identity checks. The actual signed 0.5.0 ZIP passed signature, hash/size, safe extraction, logo, and favicon verification.
+- The exact full 0.5.0 installer was deployed to Radium with its current hostname, port, and LAN scope retained. Health and session/footer metadata report 0.5.0. The LocalService account, one interactive tray process, Plex owner, protected connections, appearance file, and movie-history count were preserved. Matching tray/favicon hashes and HTTP 200 brand/favicon responses passed; runtime appearance reports the 4 px badge and 5-second notification defaults.
+- A fresh automatic public-feed check completed successfully after service startup without credentials. Private code/data backups remain on Radium, and the old Docker app remains stopped.
 - Browser automation was unavailable, and native Edge remained minimized, so this revision's full browser rendering was not visually verified.
 
 # Elementarr 0.4.1 public-update validation - October 29, 2026
