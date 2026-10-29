@@ -1,0 +1,5 @@
+# Optional installation-specific overlay; the base distribution has no Radium dependency.
+services:
+  elementarr:
+    extra_hosts:
+      radium.local: "10.0.0.14"

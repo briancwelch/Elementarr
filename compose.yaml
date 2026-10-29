@@ -1,0 +1,29 @@
+name: elementarr
+services:
+  elementarr:
+    image: elementarr:local
+    build: .
+    ports:
+      - "${ELEMENTARR_BIND_ADDRESS:-127.0.0.1}:${ELEMENTARR_PORT:-8090}:8080"
+    environment:
+      ELEMENTARR_DATA: /data
+      ASPNETCORE_ENVIRONMENT: Production
+    volumes:
+      - elementarr-data:/data
+    restart: unless-stopped
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 256
+    mem_limit: 512m
+    healthcheck:
+      test: [CMD, dotnet, Elementarr.dll, --healthcheck]
+      interval: 30s
+      timeout: 10s
+      start_period: 20s
+      retries: 3
+volumes:
+  elementarr-data:

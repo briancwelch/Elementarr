@@ -1,0 +1,12 @@
+.git
+.env*
+.local
+**/bin
+**/obj
+data
+node_modules
+*.tar
+*.tgz
+
+artifacts
+packaging

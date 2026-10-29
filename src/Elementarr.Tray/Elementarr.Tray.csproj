@@ -1,0 +1,4 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><OutputType>WinExe</OutputType><TargetFramework>net10.0-windows</TargetFramework><UseWindowsForms>true</UseWindowsForms><AssemblyName>Elementarr.Tray</AssemblyName><ApplicationIcon>Elementarr.ico</ApplicationIcon></PropertyGroup>
+  <ItemGroup><ProjectReference Include="../Elementarr.UpdateCore/Elementarr.UpdateCore.csproj" /><PackageReference Include="System.ServiceProcess.ServiceController" Version="10.0.14" /><Content Include="Elementarr.ico" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" /></ItemGroup>
+</Project>

@@ -1,0 +1,12 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Elementarr.Tray/Elementarr.Tray.csproj" />
+    <Project Path="src/Elementarr.UpdateCore/Elementarr.UpdateCore.csproj" />
+    <Project Path="src/Elementarr.Updater/Elementarr.Updater.csproj" />
+  </Folder>
+  <Folder Name="/tools/">
+    <Project Path="tools/Elementarr.ReleaseTools/Elementarr.ReleaseTools.csproj" />
+  </Folder>
+  <Project Path="src/Elementarr/Elementarr.csproj" />
+  <Project Path="tests/Elementarr.Tests/Elementarr.Tests.csproj" />
+</Solution>

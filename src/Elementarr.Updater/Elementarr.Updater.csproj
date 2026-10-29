@@ -1,0 +1,4 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net10.0-windows</TargetFramework><AssemblyName>Elementarr.Updater</AssemblyName></PropertyGroup>
+  <ItemGroup><ProjectReference Include="../Elementarr.UpdateCore/Elementarr.UpdateCore.csproj" /><PackageReference Include="System.ServiceProcess.ServiceController" Version="10.0.14" /></ItemGroup>
+</Project>
