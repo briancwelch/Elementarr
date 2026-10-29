@@ -5,6 +5,10 @@
 - The update UI no longer requests GitHub tokens. The user README now covers installation, Plex/TMDB setup, features, public automatic updates, and local backups; machine-specific development/deployment instructions remain in the separate developer guide.
 - The same-source Windows installer and update ZIP use the existing pinned publisher signing key. Private application data, encryption keys, and signing credentials remain excluded from source and release artifacts.
 
+- The published **0.4.1** update was downloaded anonymously on Radium and applied successfully by the installed signature-verifying updater, initiated once through the administrator deployment session. The service returned healthy, retained Plex ownership and byte-identical protected media connections, and preserved the movie-history count from its quiescent backup. The tray remained running and Docker remained stopped.
+- The new LocalService process subsequently performed its own scheduled startup check and logged **Public update check: idle. Elementarr is up to date.** No GitHub credential/preferences file was present. LAN health independently reported **0.4.1**.
+- Exact signed fixture bytes are preserved in Git for clean Windows/Linux checkouts. The native package startup/assets/shutdown checks passed for the released payload.
+
 The following 0.4.0 evidence predates public hosting. Its private-token setup instructions describe the earlier version and are superseded by 0.4.1.
 
 # Elementarr 0.4.0 validation - October 29, 2026
