@@ -3,12 +3,12 @@ import { $, app, api, busy, escape, imageUrl, notify, placeNotifications } from 
 import { ui, t, registerTexts, applyTexts, loadAppearance, readPreferences, savePreferences } from './ui.js';
 import { buildFilters, readFilters, writeFilters, updateFilterSummary, buildSortOptions } from './filters.js';
 import { renderMovies, renderHistory, renderDetails, applyTimelinePreferences, protectImages } from './movies.js';
-import { bindAdmin, renderAdmin } from './admin.js';
+import { bindAdmin, renderAdmin, adminTab } from './admin.js';
 import { bindUpdates, loadUpdates } from './updates.js';
 import { tvViews, bindTv, loadTvPage, renderTvSeries, renderTvHistory } from './tv.js';
 
 Object.assign(ui.words, { 'connections.reconnectPlex': 'Reconnect Plex', 'status.searchResults': 'Search results for “{query}”',
-  'status.savedConnection': 'Saved · check connection',
+  'status.savedConnection': 'Saved',
   'status.detailLoading': 'Loading the full movie story…', 'status.sourceNotices': 'Review source notices',
   'view.history.caption': 'Watched Movie History',
   'status.localFilterHelp': 'Some movies have incomplete indexed metadata. Refresh movie metadata in Administration to fill missing fields.' });
@@ -17,6 +17,7 @@ const drawers = { filters: new Drawer($('#filter-drawer'), { scroll: true, backd
   movie: new Drawer($('#movie-drawer')), match: new Drawer($('#match-drawer')) };
 const browseViews = ['for-you', 'trending', 'upcoming', 'top-rated', 'library', 'history', 'issues', ...tvViews];
 const viewFilters = {};
+const tvGenres = ['Action & Adventure', 'Animation', 'Comedy', 'Crime', 'Documentary', 'Drama', 'Family', 'Kids', 'Mystery', 'News', 'Reality', 'Sci-Fi & Fantasy', 'Soap', 'Talk', 'War & Politics', 'Western'].map((name) => ({ name }));
 let contentRequest;
 let searchTimer;
 
@@ -82,9 +83,10 @@ async function saveConnections() {
 async function loadState() {
   const state = await api('state'); app.state = state;
   const tv = tvViews.includes(app.view);
-  $('#stat-library').textContent = tv ? (state.tvLibrarySyncedAt ? state.tvLibraryCount.toLocaleString() : t('status.na')) : state.librarySyncedAt ? state.libraryCount.toLocaleString() : t('status.na');
-  $('#stat-watched').textContent = tv ? (state.tvHistorySyncedAt ? state.tvHistoryCount.toLocaleString() : t('status.na')) : state.historySyncedAt ? state.watchedCount.toLocaleString() : t('status.na');
-  $('[data-text="stats.watched"]').textContent = tv ? 'episodes watched' : t('stats.watched');
+  $('#stat-library').textContent = state.librarySyncedAt ? state.libraryCount.toLocaleString() : t('status.na');
+  $('#stat-watched').textContent = state.historySyncedAt ? state.watchedCount.toLocaleString() : t('status.na');
+  $('#stat-tv-library').textContent = state.tvLibrarySyncedAt ? state.tvLibraryCount.toLocaleString() : t('status.na');
+  $('#stat-tv-watched').textContent = state.tvHistorySyncedAt ? state.tvWatchedCount.toLocaleString() : t('status.na');
   $('#nav-count').textContent = state.librarySyncedAt ? state.libraryCount.toLocaleString() : t('status.na');
   $('#nav-count').hidden = !state.librarySyncedAt;
   $('#tv-nav-count').textContent = state.tvLibraryCount.toLocaleString(); $('#tv-nav-count').hidden = !state.tvLibrarySyncedAt;
@@ -151,31 +153,24 @@ async function navigate(view) {
   app.navigated = true;
   app.view = view; app.page = 1; app.query = ''; $('#search').value = '';
   if (window.innerWidth < 760) { app.preferences.collapsed = true; applyPreferences(); }
-  app.filters = viewFilters[view] || (view === 'library' ? { sort: 'title', order: 'asc' }
-    : ['history', 'issues'].includes(view) ? { sort: 'watched', order: 'desc' } : { sort: 'default', order: 'desc', owned: 'no', watched: 'no' });
+  app.filters = viewFilters[view] || (view === 'tv-upcoming' ? { sort: 'default', order: 'asc' } : ['library', 'tv-library'].includes(view) ? { sort: 'title', order: 'asc' }
+    : ['history', 'issues', 'tv-history', 'tv-issues'].includes(view) ? { sort: 'watched', order: 'desc' } : { sort: 'default', order: 'desc', owned: 'no', watched: 'no' });
   document.querySelectorAll('.nav-item').forEach((button) => {
     const active = button.dataset.view === view; button.classList.toggle('active', active);
     if (active) { button.setAttribute('aria-current', 'page'); const group = button.closest('details'); if (group) group.open = true; } else button.removeAttribute('aria-current');
   });
-  updateHeading(); buildSortOptions(); writeFilters();
+  updateHeading(); buildSortOptions(); if (app.filterOptions) buildFilters(view.startsWith('tv-') ? tvGenres : app.filterOptions.genres); writeFilters();
   const browse = browseViews.includes(view); const timeline = ['history', 'issues', 'tv-history', 'tv-issues'].includes(view);
   $('#settings').hidden = view !== 'settings'; $('#admin').hidden = view !== 'admin'; $('#changelog').hidden = view !== 'changelog';
-  $('#content').hidden = !browse; $('#browse-toolbar').hidden = !browse; $('#open-filters').hidden = !browse || tvViews.includes(view);
-  for (const id of ['sort-by', 'sort-order']) $('#' + id).closest('label').hidden = tvViews.includes(view);
-  document.querySelectorAll('.tv-control').forEach((control) => { control.hidden = !tvViews.includes(view); });
-  $('#tv-sort').closest('label').hidden = !tvViews.includes(view) || ['tv-history', 'tv-issues', 'tv-upcoming'].includes(view);
-  for (const id of ['timeline-thumbs', 'timeline-ratings']) $('#' + id).closest('label').hidden = ['tv-history', 'tv-issues'].includes(view);
-  const remoteTv = tvViews.includes(view) && !['tv-history', 'tv-issues', 'tv-library', 'tv-upcoming'].includes(view);
-  $('#page-size').disabled = remoteTv;
-  const providerOption = $('#page-size option[value="20"]'); if (providerOption) providerOption.remove();
-  if (remoteTv) $('#page-size').add(new Option('20 (provider)', '20'));
-  $('#page-size').value = remoteTv ? '20' : String(app.preferences.pageSize);
-  if (tvViews.includes(view)) await drawers.filters.hide();
+  $('#content').hidden = !browse; $('#browse-toolbar').hidden = !browse; $('#open-filters').hidden = !browse;
+  for (const id of ['sort-by', 'sort-order']) $('#' + id).closest('label').hidden = false;
+  $('#page-size').disabled = false; $('#page-size').value = String(app.preferences.pageSize);
   $('#timeline-controls').hidden = !timeline; $('#search').disabled = !browse;
-  $('.poster-size-control').hidden = timeline; $('.view-buttons').hidden = timeline; $('#active-filters').hidden = !browse || tvViews.includes(view);
+  $('.poster-size-control').hidden = timeline; $('.view-buttons').hidden = timeline; $('#active-filters').hidden = !browse;
   $('#pagination').hidden = true; $('#feed-notice').textContent = ''; $('#result-count').textContent = '';
   if (!browse) { app.sequence++; await drawers.filters.hide(); }
   await loadState();
+  if (view === 'settings') void checkConnections();
   if (view === 'admin') renderAdmin(); else if (view === 'changelog') await loadChangelog(); else if (browse) await loadContent();
 }
 
@@ -217,7 +212,7 @@ async function loadContent({ live = false } = {}) {
   contentRequest?.abort(); contentRequest = new AbortController();
   const signal = contentRequest.signal;
   const sequence = ++app.sequence; $('#content').setAttribute('aria-busy', 'true'); $('#pagination').hidden = true;
-  if (!live) empty(t('status.loading'), t('status.fetching'));
+  if (!live) empty(tvViews.includes(app.view) ? 'Loading TV shows...' : t('status.loading'), tvViews.includes(app.view) ? 'Finding your next TV series...' : t('status.fetching'));
   $('#search-status').textContent = 'Searching...';
   try {
     if (!app.settings.hasTmdbToken && !['library', 'history', 'issues', 'tv-library', 'tv-history', 'tv-issues', 'tv-upcoming'].includes(app.view)) { empty(t('status.noTmdb'), t('status.noTmdbHelp')); return; }
@@ -332,7 +327,7 @@ async function authorizePlex(connect) {
       await new Promise((resolve) => setTimeout(resolve, 2000)); if (flow !== app.plexFlow) return;
       const result = await api('plex/auth/poll', {}); if (result.status === 'pending') continue;
       $('#plex-auth-dialog').close(); popup?.close(); await session(); await loadSettings(); await loadFilterOptions();
-      await navigate(connect || !app.settings.plexServerId || new URLSearchParams(location.search).get('settings') === 'updates' ? 'settings' : 'for-you'); if (new URLSearchParams(location.search).get('settings') === 'updates') $('#updates-form').scrollIntoView(); notify(t(connect ? 'status.plexConnected' : 'status.plexSignedIn')); return;
+      await navigate(new URLSearchParams(location.search).get('settings') === 'updates' ? 'admin' : connect || !app.settings.plexServerId ? 'settings' : 'for-you'); if (new URLSearchParams(location.search).get('settings') === 'updates') adminTab('updates'); notify(t(connect ? 'status.plexConnected' : 'status.plexSignedIn')); return;
     }
     if (flow === app.plexFlow) throw new Error(t('error.plexExpired'));
   } catch (error) { notify(error.message, true); }
@@ -350,6 +345,32 @@ async function synchronize(button) {
       notify(t('status.synced', { sources: names.join(t('status.and')) }) + (state.warnings.length ? ' ' + t('status.reviewNotices') : ''), result.errors.length > 0);
     } catch (error) { await loadState().catch(() => {}); notify(error.message, true); }
   });
+}
+
+
+let connectionCheck;
+/** Checks saved integrations automatically, retaining the last badges while requests are in flight. */
+async function checkConnections() {
+  if (connectionCheck) return connectionCheck;
+  connectionCheck = (async () => {
+    notify('Re-checking saved connections...');
+    try {
+      const result = await api('connections/check', {});
+      for (const service of ['radarr', 'sonarr', 'tautulli', 'tmdb', 'plex']) {
+        const badge = $('#' + service + '-status'); const configured = service === 'plex' ? app.settings.hasPlexToken : service === 'tautulli' ? app.settings.tautulliEnabled && app.settings.hasTautulliKey : service === 'radarr' ? app.settings.hasRadarrKey : service === 'sonarr' ? app.settings.hasSonarrKey : app.settings.hasTmdbToken;
+        badge.textContent = t(result[service] ? 'status.connected' : configured ? 'status.attention' : service === 'tautulli' ? 'status.disabled' : 'status.notConfigured'); badge.className = `badge badge-subtle connection-status ${result[service] ? 'theme-success' : configured ? 'theme-warning' : 'theme-secondary'}`;
+      }
+      const matching = result.users.find((user) => user.name.toLowerCase() === app.settings.plexUsername.toLowerCase());
+      if (app.settings.tautulliEnabled && result.tautulli) fillOptions('#plex-user', result.users, app.settings.plexUserId || matching?.id || '', t('status.chooseUser'));
+      if (result.sonarr) { fillOptions('#sonarr-profile', result.sonarrProfiles, String(app.settings.sonarrQualityProfileId), t('status.loadProfiles')); fillOptions('#sonarr-root', result.sonarrFolders, app.settings.sonarrRootFolder, t('status.loadFolders')); }
+      if (result.radarr) { fillOptions('#quality-profile', result.profiles, String(app.settings.qualityProfileId), t('status.loadProfiles')); fillOptions('#root-folder', result.folders, app.settings.rootFolder, t('status.loadFolders')); }
+      $('#connection-results').textContent = result.errors.length ? result.errors.join('\n') : t('status.connectionsChecked');
+
+      notify(result.errors.length ? 'Connections checked. Some sources need attention.' : 'Connections checked successfully.', result.errors.length > 0);
+    } catch (error) { $('#connection-results').textContent = error.message; notify(error.message, true); }
+    finally { connectionCheck = null; }
+  })();
+  return connectionCheck;
 }
 
 /** Loads the genre taxonomy for the filter controls. */
@@ -401,19 +422,12 @@ function bindEvents() {
     app.preferences.timelineZoom = Number($('#timeline-zoom').value); applyPreferences(); if (rail) rail.scrollLeft = ratio * app.preferences.timelineZoom; savePreferences(app.preferences); });
   for (const [id, key] of [['timeline-posters', 'timelinePosters'], ['timeline-thumbs', 'timelineThumbnails'], ['timeline-ratings', 'timelineRatings']]) $('#' + id).addEventListener('change', () => { app.preferences[key] = $('#' + id).checked; applyTimelinePreferences(); savePreferences(app.preferences); });
   $('#connections-form').addEventListener('submit', async (event) => { event.preventDefault(); await busy($('#save-connections'), async () => { try { await saveConnections(); notify(t('status.connectionsSaved')); } catch (error) { notify(error.message, true); } }); });
-  $('#check-connections').addEventListener('click', async () => { await busy($('#check-connections'), async () => {
-    try { await saveConnections(); const result = await api('connections/check', {});
-      for (const service of ['radarr', 'sonarr', 'tautulli', 'tmdb', 'plex']) {
-        const badge = $('#' + service + '-status'); const configured = service === 'plex' ? app.settings.hasPlexToken : service === 'tautulli' ? app.settings.tautulliEnabled && app.settings.hasTautulliKey : service === 'radarr' ? app.settings.hasRadarrKey : service === 'sonarr' ? app.settings.hasSonarrKey : app.settings.hasTmdbToken;
-        badge.textContent = t(result[service] ? 'status.connected' : configured ? 'status.attention' : service === 'tautulli' ? 'status.disabled' : 'status.notConfigured'); badge.className = `badge badge-subtle connection-status ${result[service] ? 'theme-success' : configured ? 'theme-warning' : 'theme-secondary'}`;
-      }
-      const matching = result.users.find((user) => user.name.toLowerCase() === app.settings.plexUsername.toLowerCase());
-      if (app.settings.tautulliEnabled && result.tautulli) fillOptions('#plex-user', result.users, app.settings.plexUserId || matching?.id || '', t('status.chooseUser'));
-      if (result.sonarr) { fillOptions('#sonarr-profile', result.sonarrProfiles, String(app.settings.sonarrQualityProfileId), t('status.loadProfiles')); fillOptions('#sonarr-root', result.sonarrFolders, app.settings.sonarrRootFolder, t('status.loadFolders')); }
-      if (result.radarr) { fillOptions('#quality-profile', result.profiles, String(app.settings.qualityProfileId), t('status.loadProfiles')); fillOptions('#root-folder', result.folders, app.settings.rootFolder, t('status.loadFolders')); }
-      $('#connection-results').textContent = result.errors.length ? result.errors.join('\n') : t('status.connectionsChecked');
-    } catch (error) { $('#connection-results').textContent = error.message; notify(error.message, true); }
-  }); });
+  $('#check-connections').addEventListener('click', () => busy($('#check-connections'), async () => {
+    try { await saveConnections(); await checkConnections(); } catch (error) { notify(error.message, true); }
+  }));
+  $('#refresh-movie-metadata').addEventListener('click', (event) => busy(event.currentTarget, async () => {
+    try { await api('sync?source=radarr', {}); await api('metadata/refresh-matches', {}); notify('Refreshing movie metadata and matches in the background.'); } catch (error) { notify(error.message, true); }
+  }));
   document.querySelectorAll('[data-sync]').forEach((button) => button.addEventListener('click', () => synchronize(button)));
   $('#tautulli-enabled').addEventListener('change', () => { $('#tautulli-fields').hidden = !$('#tautulli-enabled').checked; });
   $('#plex-login').addEventListener('click', (event) => busy(event.currentTarget, () => authorizePlex(false)));
@@ -437,9 +451,8 @@ function bindEvents() {
   $('#match-form').addEventListener('submit', async (event) => { event.preventDefault(); await busy(event.submitter, searchMatches); });
   document.addEventListener('elementarr:filters-applied', () => { app.page = 1; void loadContent(); });
   document.addEventListener('elementarr:session-expired', () => { void session(); });
-  document.addEventListener('elementarr:appearance-changed', () => { applyTexts(); updateHeading(); buildSortOptions(); if (app.filterOptions) buildFilters(app.filterOptions.genres); applyPreferences(); });
+  document.addEventListener('elementarr:appearance-changed', () => { applyTexts(); updateHeading(); buildSortOptions(); if (app.filterOptions) buildFilters(app.view.startsWith('tv-') ? tvGenres : app.filterOptions.genres); applyPreferences(); });
   document.addEventListener('elementarr:rating-imported', () => { void loadFilterOptions(); });
-  for (const id of ['tv-sort', 'tv-order']) $('#' + id).addEventListener('change', async () => { app.page = 1; await loadContent(); });
   bindTv(async (settingsChanged) => { if (settingsChanged) await loadSettings(); await loadState(); if (browseViews.includes(app.view)) await loadContent(); });
   $('#restore-movie-history').addEventListener('click', (event) => busy(event.currentTarget, async () => {
     if (!window.confirm('Allow all removed movie-history items to be imported again on the next movie-history sync?')) return;
@@ -452,7 +465,7 @@ function bindEvents() {
 /** Starts the existing local/LAN app using only configured providers and saved display preferences. */
 async function start() {
   registerTexts(); bindEvents();
-  try { await loadAppearance(); initPreferences(); if (await session()) { await loadSettings(); await loadFilterOptions(); await navigate(new URLSearchParams(location.search).get('settings') === 'updates' ? 'settings' : 'for-you'); if (new URLSearchParams(location.search).get('settings') === 'updates') $('#updates-form').scrollIntoView(); } }
+  try { await loadAppearance(); initPreferences(); if (await session()) { await loadSettings(); await loadFilterOptions(); await navigate(new URLSearchParams(location.search).get('settings') === 'updates' ? 'admin' : 'for-you'); if (new URLSearchParams(location.search).get('settings') === 'updates') adminTab('updates'); } }
   catch (error) { $('#login-view').hidden = false; $('#login-error').textContent = t('error.start', { message: error.message }); }
 }
 

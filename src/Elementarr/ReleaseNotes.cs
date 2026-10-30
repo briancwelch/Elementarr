@@ -5,6 +5,19 @@ public sealed record ReleaseNote(string Version, string Date, string Title, stri
 public static class ReleaseNotes
 {
     public static IReadOnlyList<ReleaseNote> All { get; } = [
+        new("0.5.2", "2026-10-30", "Explore every season", [
+            "Expandable TV seasons show episode lists and watched status; show posters display completion progress based on distinct regular episodes.",
+            "TV discovery and collections have extensive independent year, rating, genre, runtime, language, country, certification, collection and history filters.",
+            "Filters slide from beneath the navigation, which stays visible throughout opening and closing. Timeline mouse wheels scroll the page; Shift-wheel, trackpads and dragging still navigate horizontally.",
+            "TV artwork spans the full detail-card width. Connections automatically recheck with toast feedback, with movie metadata refresh in Radarr and history sync only in Plex and Tautulli.",
+            "TV pagination uses TV loading text. A circular favicon matches the other media services."
+        ]),
+        new("0.5.1", "2026-10-29", "Movies and television, together", [
+            "TV show and episode flyouts share the rich movie layout, including artwork, ratings, synopsis, facts, credits and links.",
+            "TV timelines use episode stills, show posters, episode ratings and metadata, with the same display controls as movie timelines.",
+            "Equal third-width connection cards, combined Plex history sync, and collection and watched totals for movies and TV.",
+            "Automatic Updates and Server & Port are separate Administration tabs."
+        ]),
         new("0.5.0", "2026-10-29", "A more cohesive Elementarr", [
             "Grouped movie and TV navigation, upcoming Sonarr episodes, separate affected TV history, and a built-in changelog.",
             "Atom-and-clapperboard branding, matching favicon and Windows icons, a version footer, and Plex profile pictures.",

@@ -22,7 +22,7 @@ public sealed class MediaApi(IHttpClientFactory clients) : IDisposable
     /// <summary>Fetches artwork from an authenticated source without exposing source credentials or arbitrary image URLs to the browser.</summary>
     public async Task<(byte[] Bytes, string ContentType)> TvArtworkAsync(Connections settings, string source, int id, CancellationToken ct)
     {
-        if (id <= 0 || source is not ("sonarr" or "plex")) throw new ArgumentException("Choose a valid TV artwork item.");
+        if (id <= 0 || source is not ("sonarr" or "plex" or "plex-episode")) throw new ArgumentException("Choose a valid TV artwork item.");
         var url = source == "sonarr" ? settings.SonarrUrl.TrimEnd('/') + $"/MediaCover/{id}/poster.jpg"
             : settings.PlexUrl.TrimEnd('/') + $"/library/metadata/{id}/thumb";
         using var request = new HttpRequestMessage(HttpMethod.Get, url);

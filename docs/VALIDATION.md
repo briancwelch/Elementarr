@@ -1,3 +1,12 @@
+# Elementarr 0.5.2 validation - October 30, 2026
+
+- **189 integration checks passed on Carbon Windows and in Docker**, including distinct-episode progress and 88-percent rounding, cached season lists with live watch flags, combined extensive TV filters, malformed bounds, multi-provider-page TV filtering, snapshot isolation, and conservative movie match repair.
+- **16 frontend DOM regressions passed**, including TV-specific filter state, lazy season expansion, automatic saved-connection checks without credential submission, and vertical versus Shift-horizontal timeline wheel behavior.
+- Actual headless Edge checks used the production Bootstrap drawers and isolated upstream fixtures. Full-width TV artwork, season episode/watch rendering, equal connection cards, desktop/mobile layouts, filter animation with expanded/collapsed navigation, and vertical page scrolling over the timeline passed without page errors. Artwork in these browser screenshots was substituted fixture imagery, not live provider artwork.
+- The circular SVG and multi-size ICO favicon were rendered and visually inspected with transparent corners. The application and tray retain their existing brand artwork.
+- The self-contained Windows 0.5.2 payload passed fresh Plex-only startup, packaged assets, and shutdown/identity preservation. Release metadata was signed and verified with the existing publisher key; the actual update ZIP matches its signed hash/size and the validated TV, CSS and favicon assets.
+- The source-bound Carbon Docker gate is healthy at localhost:8090. No upstream add, download search, or real-account history mutation was used for testing.
+
 # Elementarr 0.5.0 interface validation - October 29, 2026
 
 - **157 integration checks passed on Windows and in Docker** and cover new appearance defaults/persistence/bounds, authenticated release identity, bounded credential-free Plex avatar proxying and safe Plex-only redirects, fourteen-day Sonarr episode filtering/order/search, separate affected-TV-history browsing, and the shared branding assets.

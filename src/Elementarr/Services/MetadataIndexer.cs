@@ -13,20 +13,21 @@ public sealed class MetadataIndexer(StateStore store, MetadataService metadata, 
     public IndexStatus Status => Volatile.Read(ref status);
 
     /// <summary>Queues one explicit full metadata refresh without blocking the browser or duplicating jobs.</summary>
-    public void Start()
+    public void Start(bool rematch = false)
     {
         if (Status.Running) return;
         var total = store.Snapshot.Library.Select(x => x.TmdbId).Concat(store.Snapshot.History.Where(x => x.TmdbId.HasValue)
             .Select(x => x.TmdbId!.Value)).Distinct().Count();
         Volatile.Write(ref status, new(true, 0, total, 0));
-        if (!queue.Writer.TryWrite(true)) Volatile.Write(ref status, new(false, 0, total, 0, "A refresh is already queued."));
+        if (!queue.Writer.TryWrite(rematch)) Volatile.Write(ref status, new(false, 0, total, 0, "A refresh is already queued."));
     }
 
     /// <summary>Fetches detailed metadata in bounded batches, saving progress so interruptions retain completed work.</summary>
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        await foreach (var _ in queue.Reader.ReadAllAsync(stoppingToken))
+        await foreach (var rematch in queue.Reader.ReadAllAsync(stoppingToken))
         {
+            if (rematch) await RefreshMatchesAsync(stoppingToken);
             var ids = store.Snapshot.Library.Select(x => x.TmdbId).Concat(store.Snapshot.History.Where(x => x.TmdbId.HasValue)
                 .Select(x => x.TmdbId!.Value)).Where(x => x > 0).Distinct().ToArray();
             int completed = 0, failed = 0;
@@ -67,6 +68,23 @@ public sealed class MetadataIndexer(StateStore store, MetadataService metadata, 
                 Volatile.Write(ref status, new(false, completed, ids.Length, failed, "Metadata refresh stopped. Existing cached metadata was retained.", UnavailableMovies(unavailable, titles)));
             }
         }
+    }
+
+    /// <summary>Repairs only unambiguous unmatched movie plays from the current Radarr title/year index, retaining explicit matches and all history.</summary>
+    private async Task RefreshMatchesAsync(CancellationToken ct)
+    {
+        await store.Mutation.WaitAsync(ct);
+        try
+        {
+            var snapshot = store.Snapshot;
+            var index = snapshot.Library.GroupBy(x => (Title: x.Title.ToUpperInvariant(), x.Year))
+                .ToDictionary(x => x.Key, x => x.Select(movie => movie.TmdbId).Distinct().ToArray());
+            var history = snapshot.History.Select(play => !play.TmdbId.HasValue
+                && index.TryGetValue((play.Title.ToUpperInvariant(), play.Year), out var matches) && matches.Length == 1
+                ? play with { TmdbId = matches[0] } : play).ToList();
+            if (!history.SequenceEqual(snapshot.History)) await store.SaveSnapshotAsync(snapshot with { History = history }, ct);
+        }
+        finally { store.Mutation.Release(); }
     }
 
     /// <summary>Identifies affected movies by their real local title without exposing integration credentials or unrelated history.</summary>

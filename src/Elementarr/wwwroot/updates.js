@@ -27,5 +27,5 @@ export function bindUpdates() {
     try { await api('updates/install', {}); notify('The verified update is queued. Elementarr will restart when installation begins.', false, true); await loadUpdates(); }
     catch (error) { notify(error.message, true); }
   }));
-  setInterval(() => { if (!document.hidden && !$('#app-view').hidden && app.view === 'settings') void loadUpdates(false).catch(() => {}); }, 10000);
+  setInterval(() => { if (!document.hidden && !$('#app-view').hidden && app.view === 'admin' && !$('#admin-updates').hidden) void loadUpdates(false).catch(() => {}); }, 10000);
 }

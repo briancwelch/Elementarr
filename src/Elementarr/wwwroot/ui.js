@@ -19,7 +19,7 @@ Object.assign(ui.words, {
   'view.settings.eyebrow': 'YOUR SERVER. YOUR MOVIES.', 'view.settings.title': 'Bring it all together.',
   'view.settings.description': 'Connect your movie and TV services and choose where new discoveries go.', 'view.settings.caption': 'Connections',
   'view.admin.eyebrow': 'MAKE THIS SPACE YOURS', 'view.admin.title': 'The control room.',
-  'view.admin.description': 'Appearance, typography, wording, display defaults, and metadata tools.', 'view.admin.caption': 'Administration',
+  'view.admin.description': 'Appearance, wording, metadata, automatic updates, and server preferences.', 'view.admin.caption': 'Administration',
   'error.signIn': 'Please sign in again.', 'error.rateLimit': 'Too many attempts. Wait a minute and try again.',
   'error.password': 'That password did not match.', 'error.request': 'The request failed ({status}).',
   'error.start': 'Cannot load Elementarr: {message}', 'error.form': 'Please complete the highlighted fields.',

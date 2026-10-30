@@ -37,12 +37,84 @@ internal static class TvChecks
         check(JsonSerializer.Serialize(store.Snapshot) == movieBefore, "TV watch history cannot modify watched movie history, even when numeric IDs collide");
         var tvHistory = await browser.GetFromJsonAsync<JsonElement>("/api/tv/browse?view=tv-history&pageSize=10&query=Fixture");
         check(tvHistory.Items("plays").Count() == 2 && !tvHistory.Items("series").Any(), "TV history has a separate searchable episode API");
+        var episodeCard = tvHistory.Items("plays").First();
+        var details = episodeCard.GetProperty("details");
+        check(details.GetProperty("facts").Text("backdrop") == "/episode-still.jpg" && episodeCard.GetProperty("series").Text("poster") == "/poster.jpg",
+            "TV timeline uses episode artwork and the parent show's poster as distinct assets");
+        check(details.GetProperty("facts").Number("runtime") == 24 && details.GetProperty("facts").Number("tmdb") == 8.7 && details.Text("overview") == "An episode-specific synopsis.",
+            "TV history exposes episode-specific runtime, rating and synopsis rather than substituting show facts");
+        var showDetails = await browser.GetFromJsonAsync<JsonElement>("/api/tv/1");
+        check(showDetails.GetProperty("facts").Text("logo") == "/series-logo.png" && showDetails.GetProperty("facts").Text("certification") == "TV-PG"
+            && showDetails.GetProperty("facts").Items("cast").Any(), "TV drawers expose artwork, certification, credits and rich show facts");
+        var episodeDetails = await browser.GetFromJsonAsync<JsonElement>("/api/tv/1/season/2/episode/3");
+        check(episodeDetails.GetProperty("facts").Text("imdbId") == "tt7654321" && episodeDetails.GetProperty("facts").Text("director") == "Episode Director",
+            "Episode drawers use episode-specific IMDb links and credits");
+        check((await browser.GetAsync("/api/tv/art/plex-episode/5")).Content.Headers.ContentType?.MediaType == "image/png"
+            && (await browser.GetAsync("/api/tv/art/plex-episode/9999")).StatusCode == HttpStatusCode.BadRequest,
+            "Episode artwork proxy serves recorded TV items only and keeps Plex credentials server-side");
+        var combined = await browser.PostAsJsonAsync("/api/sync?source=history", new { });
+        await SuccessAsync(combined);
+        var combinedResult = await combined.Content.ReadFromJsonAsync<JsonElement>();
+        check(combinedResult.Flag("historySynced") && combinedResult.Flag("tvHistorySynced") && !combinedResult.Flag("sonarrSynced") && !combinedResult.Flag("radarrSynced"),
+            "Sync History imports movies and episodes without scanning either collection");
+        var totals = await browser.GetFromJsonAsync<JsonElement>("/api/state");
+        check(totals.Number("tvWatchedCount") == 1 && totals.Number("tvHistoryCount") == 2 && totals.Number("tvLibraryCount") == 1,
+            "Watched totals count distinct episodes while preserving repeat plays in the timeline");
+        var metadataReloaded = new TvMetadataService(store, services.GetRequiredService<MediaApi>(), services.GetRequiredService<Microsoft.Extensions.Configuration.IConfiguration>());
+        check((await metadataReloaded.EpisodeAsync(1, 2, 3, default))?.Facts.Backdrop == "/episode-still.jpg", "Episode metadata survives service reload");
         var movies = await browser.GetFromJsonAsync<JsonElement>("/api/history");
         check(movies.Items("plays").All(x => !x.Text("title").Contains("Episode")), "Movie history never exposes TV episode records");
         var tvLibrary = await browser.GetFromJsonAsync<JsonElement>("/api/tv/browse?view=tv-library&pageSize=10");
         check(tvLibrary.Items("series").Single().Flag("hasWatchedEpisodes"), "A watched episode is labeled as partial series history, not a fully watched series");
         var tvTrending = await browser.GetFromJsonAsync<JsonElement>("/api/tv/browse?view=tv-trending");
         check(tvTrending.Items("series").Any() && fixture.TvRequests > 0, "TV discovery uses TMDB's TV namespace");
+        var movieBeforeFeatures = JsonSerializer.Serialize(store.Snapshot);
+        var seasons = await browser.GetFromJsonAsync<JsonElement>("/api/tv/1");
+        check(seasons.GetProperty("facts").Items("seasonList").Count() == 2 && seasons.Number("watchedEpisodeCount") == 1,
+            "Show details expose seasons and count rewatches as one distinct watched episode");
+        var seasonEpisodes = await browser.GetFromJsonAsync<JsonElement>("/api/tv/1/season/2");
+        check(seasonEpisodes.Items().Count() == 4 && seasonEpisodes.Items().Single(x => x.Number("episode") == 3).Flag("watched")
+            && seasonEpisodes.Items().Count(x => x.Flag("watched")) == 1, "Season episodes use exact show/season/episode watch flags");
+        var seasonCalls = fixture.TvSeasonRequests;
+        await browser.GetAsync("/api/tv/1/season/2");
+        check(fixture.TvSeasonRequests == seasonCalls, "Repeated season expansion uses cached provider episodes");
+        var savedTv = store.Tv;
+        try
+        {
+            var seven = Enumerable.Range(1, 7).Select(n => new TvWatch("p" + n, "p" + n, "show50", "Series 50", "Episode", 1, n, 1760000000, 50, 150)).ToList();
+            await store.SaveTvAsync(savedTv with { History = [.. savedTv.History, .. seven, seven[0] with { Id = "rewatch" }, seven[0] with { Id = "special", Season = 0 }] }, default);
+            var progress = await browser.GetFromJsonAsync<JsonElement>("/api/tv/50");
+            check(progress.Number("watchedEpisodeCount") == 7 && progress.Number("completionPercent") == 88,
+                "Show progress rounds seven of eight episodes to 88 percent without inflating rewatches or specials");
+            await store.SaveTvAsync(store.Tv with { History = [.. store.Tv.History, seven[0] with { Id = "last", Episode = 8 }] }, default);
+            check((await browser.GetFromJsonAsync<JsonElement>("/api/tv/50")).Number("completionPercent") == 100,
+                "A show reaches 100 percent only when all known regular episodes are watched");
+            await store.SaveTvAsync(savedTv with { History = [] }, default);
+            var unwatched = await browser.GetFromJsonAsync<JsonElement>("/api/tv/1/season/2");
+            check(unwatched.Items().All(x => !x.Flag("watched")) && fixture.TvSeasonRequests == seasonCalls,
+                "Cached seasons recompute watch flags from current history rather than persisting stale flags");
+        }
+        finally { await store.SaveTvAsync(savedTv, default); }
+        var filteredTv = await browser.GetFromJsonAsync<JsonElement>("/api/tv/browse?view=tv-library&genres=Comedy&genreMode=all&runtimeMin=20&runtimeMax=25&language=en&country=US&certification=TV-PG&tmdbMin=8&votesMin=50&yearFrom=2020&yearTo=2020&owned=yes&watched=yes&completion=partial&releasedFrom=2020-01-01&releasedTo=2020-12-31");
+        check(filteredTv.Items("series").Count() == 1, "TV filters combine ratings, votes, genres, runtime, language, country, certification, dates and collection/history states");
+        foreach (var clause in new[] { "excludeGenres=Comedy", "runtimeMax=10", "language=fr", "country=CA", "certification=TV-MA", "completion=completed", "tmdbMin=9", "rtMin=90", "watchedFrom=2099-01-01" })
+            check(!(await browser.GetFromJsonAsync<JsonElement>("/api/tv/browse?view=tv-library&" + clause)).Items("series").Any(), "TV filters exclude nonmatching known and missing facts: " + clause);
+        check((await browser.GetFromJsonAsync<JsonElement>("/api/tv/browse?view=tv-library&rtMin=90&includeUnrated=true")).Items("series").Any(), "TV rating filters honor include-unrated explicitly");
+        check((await browser.GetAsync("/api/tv/browse?view=tv-trending&runtimeMin=-1")).StatusCode == HttpStatusCode.BadRequest
+            && (await browser.GetAsync("/api/tv/1/season/-1")).StatusCode == HttpStatusCode.BadRequest, "TV filters and season routes reject malformed bounds");
+        fixture.PagedTv = true;
+        try
+        {
+            const string feed = "/api/tv/browse?view=tv-trending&query=paged&genres=Comedy&pageSize=10";
+            var firstScan = await browser.GetFromJsonAsync<JsonElement>(feed);
+            check(firstScan.Items("series").Count() == 5 && firstScan.Flag("incomplete") && firstScan.Flag("hasMore"), "Bounded TV discovery scans report honest partial matches instead of stopping at the first provider page");
+            var continued = await browser.GetFromJsonAsync<JsonElement>(feed);
+            var nextPage = await browser.GetFromJsonAsync<JsonElement>(feed + "&page=2");
+            check(continued.Items("series").Count() == 10 && nextPage.Items("series").Count() == 2 && !nextPage.Flag("hasMore")
+                && !continued.Items("series").Select(x => x.Number("tmdbId")).Intersect(nextPage.Items("series").Select(x => x.Number("tmdbId"))).Any(), "TV filtered pagination accumulates provider matches without dropping or repeating shows");
+        }
+        finally { fixture.PagedTv = false; }
+        check(JsonSerializer.Serialize(store.Snapshot) == movieBeforeFeatures, "TV seasons, progress and filtering never alter the movie snapshot");
         fixture.FailPlex = true;
         fixture.FailSonarr = true;
         check((await browser.PostAsJsonAsync("/api/sync?source=tv-history", new { })).StatusCode == HttpStatusCode.BadGateway, "TV history reports a Plex outage");

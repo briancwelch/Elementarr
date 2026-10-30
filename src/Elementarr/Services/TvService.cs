@@ -1,11 +1,22 @@
 using System.Net;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Collections.Concurrent;
 
 namespace Elementarr.Services;
 
 public sealed class TvService(StateStore store, MediaApi api, PlexService plex, TvMetadataService metadata)
 {
+    private readonly ConcurrentDictionary<string, TvFeed> feeds = new();
+    private sealed class TvFeed
+    {
+        public readonly SemaphoreSlim Gate = new(1, 1);
+        public readonly List<TvSeries> Series = [];
+        public int NextPage = 1;
+        public int SourcePages = 500;
+        public DateTimeOffset Created = DateTimeOffset.UtcNow;
+    }
+
     /// <summary>Refreshes TV sources independently under the installation's shared mutation lock.</summary>
     public async Task<(bool Library, bool History, List<string> Errors)> SyncLockedAsync(string source, CancellationToken ct)
     {
@@ -29,7 +40,7 @@ public sealed class TvService(StateStore store, MediaApi api, PlexService plex, 
                 await store.SaveTvAsync(store.Tv with { LibraryError = exception.Message }, ct);
             }
         }
-        if (source is ("all" or "tv-history") && settings.PlexToken.Length > 0 && settings.PlexServerId.Length > 0)
+        if (source is ("all" or "history" or "tv-history") && settings.PlexToken.Length > 0 && settings.PlexServerId.Length > 0)
         {
             try
             {
@@ -66,9 +77,9 @@ public sealed class TvService(StateStore store, MediaApi api, PlexService plex, 
             if (!int.TryParse(container.Text("totalSize"), out var total) || total < 0 || total > 100_000
                 || container.Number("offset") != offset || (rows.Length == 0 && offset < total))
                 throw new UpstreamException("Plex returned incomplete TV history. The previous TV history has been retained.");
-            // Plex history omits parent fields on many servers; resolve episode metadata before resolving its parent show.
+            // Episode details provide source ratings, synopsis and parent identifiers missing from history rows.
             var missing = rows.Where(x => x.Text("accountID") == "1" && x.Text("type") == "episode")
-                .Where(x => ShowKey(x).Length == 0).Select(x => x.Text("ratingKey"))
+                .Select(x => x.Text("ratingKey"))
                 .Where(x => long.TryParse(x, out var key) && key > 0 && !episodes.ContainsKey(x)).Distinct().ToArray();
             foreach (var batch in missing.Chunk(100))
             {
@@ -115,7 +126,9 @@ public sealed class TvService(StateStore store, MediaApi api, PlexService plex, 
                     if (matches.Length == 1) { tmdb ??= matches[0].TmdbId; tvdb ??= matches[0].TvdbId; poster = matches[0].Poster; sonarrId = matches[0].SonarrId; }
                     if (!resolvedShows.TryGetValue(showKey, out var resolved))
                     {
-                        resolved = new TvSeries(tmdb, tvdb ?? 0, title, (int)show.Number("year"), show.Text("summary"), poster, SonarrId: sonarrId);
+                        var plexFacts = MetadataService.ParsePlex(show);
+                        resolved = new TvSeries(tmdb, tvdb ?? 0, title, (int)show.Number("year"), show.Text("summary"), poster, SonarrId: sonarrId,
+                            Facts: new([], "", 0, 0, 0, "", null, []) { Imdb = plexFacts.Imdb, RottenTomatoes = plexFacts.RottenTomatoes, RatingOrigin = "Plex / TMDB" });
                         try { resolved = await metadata.ResolveAsync(resolved, ct); }
                         catch (UpstreamException) { /* A TMDB outage cannot discard readable Plex episode history. */ }
                         resolvedShows[showKey] = resolved;
@@ -129,7 +142,10 @@ public sealed class TvService(StateStore store, MediaApi api, PlexService plex, 
                     if (matches.Length == 1) { tmdb = matches[0].TmdbId; tvdb = matches[0].TvdbId; poster = matches[0].Poster; sonarrId = matches[0].SonarrId; }
                 }
                 plays.Add(new(id, key, showKey, title, row.Text("title", episodeDetail.Text("title")), Nonnegative(row, "parentIndex") ?? Nonnegative(episodeDetail, "parentIndex"),
-                    Nonnegative(row, "index") ?? Nonnegative(episodeDetail, "index"), date, tmdb, tvdb, poster, sonarrId));
+                    Nonnegative(row, "index") ?? Nonnegative(episodeDetail, "index"), date, tmdb, tvdb, poster, sonarrId,
+                    new(row.Text("title", episodeDetail.Text("title")), row.Text("summary", episodeDetail.Text("summary")),
+                        row.Text("originallyAvailableAt", episodeDetail.Text("originallyAvailableAt")),
+                        MetadataService.ParsePlex(episodeDetail.ValueKind == JsonValueKind.Object ? episodeDetail : row))));
             }
             offset += rows.Length;
             if (offset >= total) break;
@@ -143,20 +159,40 @@ public sealed class TvService(StateStore store, MediaApi api, PlexService plex, 
     public async Task<TvPage> BrowseAsync(IQueryCollection query, CancellationToken ct)
     {
         var view = query["view"].ToString();
+        var filter = BrowseOptions.FromQuery(query);
+        (filter with { View = "library" }).Validate();
         var text = query["query"].ToString().Trim();
         var page = int.TryParse(query["page"], out var number) ? number : 1;
         var size = int.TryParse(query["pageSize"], out number) ? number : 25;
         if (page is < 1 or > 500 || size is not (10 or 25 or 50 or 100) || text.Length > 200)
             throw new ArgumentException("Choose a valid TV page and a search of up to 200 characters.");
-        if (view == "tv-upcoming") return await UpcomingAsync(text, page, size, ct);
+        if (view == "tv-upcoming") return await UpcomingAsync(text, page, size, filter, ct);
         if (view is "tv-history" or "tv-issues")
         {
+            Dictionary<(int?, int?, string, string), TvSeries> shows = [];
+            // Resolve each history show once; long histories can contain thousands of rewatches.
+            TvSeries Show(TvWatch watch)
+            {
+                var key = (watch.TmdbId, watch.TvdbId, watch.SeriesKey, watch.SeriesTitle);
+                if (!shows.TryGetValue(key, out var show)) shows[key] = show = Annotate(store.Tv.Library.FirstOrDefault(s => SameShow(s, watch))
+                    ?? new TvSeries(watch.TmdbId, watch.TvdbId ?? 0, watch.SeriesTitle, 0, "", watch.Poster));
+                return show;
+            }
             var rows = store.Tv.History.Where(x => view != "tv-issues" || (x.TmdbId is null && x.TvdbId is null))
                 .Where(x => text.Length == 0 || x.SeriesTitle.Contains(text, StringComparison.OrdinalIgnoreCase)
-                || x.EpisodeTitle.Contains(text, StringComparison.OrdinalIgnoreCase)).ToArray();
-            if (query["order"] == "asc") rows = rows.Reverse().ToArray();
+                || x.EpisodeTitle.Contains(text, StringComparison.OrdinalIgnoreCase))
+                .Where(x => WatchDateMatches(x, filter))
+                .Where(x => Matches(Show(x), filter with { Query = "", Watched = "any", WatchedFrom = "", WatchedTo = "" }))
+                .Where(_ => filter.Watched != "no").ToArray();
+            if (filter.Sort is "default" or "watched") rows = (filter.Order == "asc" ? rows.OrderBy(x => x.WatchedAt) : rows.OrderByDescending(x => x.WatchedAt)).ToArray();
+            else rows = (filter.Order == "asc" ? rows.OrderBy(x => SortKey(Show(x), filter.Sort) is null).ThenBy(x => SortKey(Show(x), filter.Sort))
+                : rows.OrderBy(x => SortKey(Show(x), filter.Sort) is null).ThenByDescending(x => SortKey(Show(x), filter.Sort))).ToArray();
             var pages = Math.Max(1, (int)Math.Ceiling(rows.Length / (double)size));
-            return new([], rows.Skip((page - 1) * size).Take(size).ToList(), page, pages, rows.Length, page < pages);
+            List<TvWatch> enriched = [];
+            foreach (var batch in rows.Skip((page - 1) * size).Take(size).Chunk(4))
+                enriched.AddRange(await Task.WhenAll(batch.Select(x => EnrichWatchAsync(x, ct))));
+            await metadata.SaveAsync(ct);
+            return new([], enriched, page, pages, rows.Length, page < pages);
         }
         List<TvSeries> series;
         int totalPages;
@@ -164,38 +200,113 @@ public sealed class TvService(StateStore store, MediaApi api, PlexService plex, 
         string? notice = null;
         if (view == "tv-library")
         {
-            series = store.Tv.Library.Where(x => text.Length == 0 || x.Title.Contains(text, StringComparison.OrdinalIgnoreCase)).Select(Annotate).ToList();
-            series = Sort(series, query["sort"]!, query["order"]!);
+            series = store.Tv.Library.Where(x => text.Length == 0 || x.Title.Contains(text, StringComparison.OrdinalIgnoreCase)).Select(Annotate).Where(x => Matches(x, filter)).ToList();
+            series = Sort(series, filter.Sort, filter.Order);
             count = series.Count;
             totalPages = Math.Max(1, (int)Math.Ceiling(count / (double)size));
             series = series.Skip((page - 1) * size).Take(size).ToList();
         }
         else
         {
-            // Provider pagination stays explicit; movie filters and movie IDs never participate in TV feeds.
-            var path = text.Length > 0 ? $"search/tv?query={Uri.EscapeDataString(text)}&include_adult=false&page={page}"
-                : view switch
-                {
-                    "tv-trending" or "tv-for-you" => $"trending/tv/week?page={page}",
-                    "tv-top-rated" => $"tv/top_rated?page={page}",
-                    _ => throw new ArgumentException("Choose a valid TV view.")
-                };
-            var seed = store.Tv.History.Where(x => x.TmdbId.HasValue).Select(x => (Id: x.TmdbId!.Value, Title: x.SeriesTitle))
-                .Concat(store.Tv.Library.Where(x => x.TmdbId.HasValue).Select(x => (Id: x.TmdbId!.Value, x.Title))).FirstOrDefault();
-            if (view == "tv-for-you" && text.Length == 0 && seed.Id > 0) path = $"tv/{seed.Id}/recommendations?page={page}";
-            var json = await api.TmdbAsync(store.Settings, path, ct);
-            series = json.Items("results").Where(x => !x.Flag("adult")).Select(ParseTmdb).Select(Annotate).ToList();
-            if (view == "tv-for-you" && text.Length == 0 && seed.Id > 0) series = series.Select(x => x with { Reason = "Because you watched " + seed.Title }).ToList();
-            totalPages = Math.Max(1, Math.Min(500, (int)json.Number("total_pages")));
-            count = (int)json.Number("total_results");
-            notice = "TV discovery uses provider pages of up to 20 shows. Sorting applies to this page; movie filters do not apply.";
-            series = Sort(series, query["sort"]!, query["order"]!);
+            return await DiscoverAsync(filter, ct);
         }
         return new(series, [], page, totalPages, count, page < totalPages, notice);
     }
 
+    /// <summary>Accumulates bounded TV provider pages so filters and pagination apply to matching shows across pages.</summary>
+    private async Task<TvPage> DiscoverAsync(BrowseOptions filter, CancellationToken ct)
+    {
+        if (filter.View is not ("tv-for-you" or "tv-trending" or "tv-top-rated")) throw new ArgumentException("Choose a valid TV view.");
+        foreach (var old in feeds.Where(x => x.Value.Created < DateTimeOffset.UtcNow.AddMinutes(-20)).Select(x => x.Key)) feeds.TryRemove(old, out _);
+        var key = JsonSerializer.Serialize(filter with { Page = 1, PageSize = 25 }) + store.Tv.LibrarySyncedAt + store.Tv.HistorySyncedAt + store.Settings.Region;
+        if (!feeds.ContainsKey(key) && feeds.Count >= 80) throw new ArgumentException("Too many active TV filter combinations. Try again in a few minutes.");
+        var feed = feeds.GetOrAdd(key, _ => new());
+        await feed.Gate.WaitAsync(ct);
+        try
+        {
+            var matches = feed.Series.Select(Annotate).Where(x => Matches(x, filter)).ToList();
+            var seed = store.Tv.History.Where(x => x.TmdbId.HasValue).Select(x => (Id: x.TmdbId!.Value, Title: x.SeriesTitle))
+                .Concat(store.Tv.Library.Where(x => x.TmdbId.HasValue).Select(x => (Id: x.TmdbId!.Value, x.Title))).FirstOrDefault();
+            for (var scan = 0; matches.Count < filter.Page * filter.PageSize + 1 && feed.NextPage <= feed.SourcePages && scan < 5; scan++)
+            {
+                var providerPage = feed.NextPage;
+                var route = filter.Query.Length > 0 ? $"search/tv?query={Uri.EscapeDataString(filter.Query)}&include_adult=false&page={providerPage}"
+                    : filter.View == "tv-for-you" && seed.Id > 0 ? $"tv/{seed.Id}/recommendations?page={providerPage}"
+                    : filter.View == "tv-top-rated" ? $"tv/top_rated?page={providerPage}" : $"trending/tv/week?page={providerPage}";
+                var json = await api.TmdbAsync(store.Settings, route, ct);
+                var known = feed.Series.Select(x => x.TmdbId).ToHashSet();
+                var fresh = json.Items("results").Where(x => !x.Flag("adult") && x.Number("id") > 0).Select(ParseTmdb).Where(x => known.Add(x.TmdbId)).ToList();
+                fresh = await metadata.ResolveManyAsync(fresh, ct);
+                if (filter.View == "tv-for-you" && filter.Query.Length == 0 && seed.Id > 0)
+                    fresh = fresh.Select(x => x with { Reason = "Because you watched " + seed.Title }).ToList();
+                feed.Series.AddRange(fresh);
+                feed.SourcePages = Math.Clamp((int)json.Number("total_pages"), 1, 500);
+                feed.NextPage++;
+                matches = feed.Series.Select(Annotate).Where(x => Matches(x, filter)).ToList();
+            }
+            matches = Sort(matches, filter.Sort, filter.Order);
+            var more = feed.NextPage <= feed.SourcePages;
+            return new(matches.Skip((filter.Page - 1) * filter.PageSize).Take(filter.PageSize).ToList(), [], filter.Page,
+                Math.Max(1, (int)Math.Ceiling(matches.Count / (double)filter.PageSize)), matches.Count,
+                more || matches.Count > filter.Page * filter.PageSize,
+                more ? "Searching TV provider pages for matching shows. Continue searching to check more results." : null,
+                more && matches.Count < filter.Page * filter.PageSize);
+        }
+        finally { feed.Gate.Release(); }
+    }
+
+    /// <summary>Adapts only TV facts to the shared filter rules; movie snapshots and matching never participate.</summary>
+    private bool Matches(TvSeries show, BrowseOptions filter)
+    {
+        var facts = show.Facts;
+        var movie = new Movie(show.TmdbId ?? 0, show.Title, show.Year, show.Overview, show.Poster, facts?.FirstAirDate, show.Score ?? 0,
+            InRadarr: show.InSonarr, Available: show.EpisodeFileCount > 0, Watched: show.HasWatchedEpisodes,
+            Facts: new MovieFacts { Genres = facts?.Genres ?? [], Runtime = facts?.Runtime ?? 0, Language = facts?.Language ?? "",
+                Country = facts?.Country ?? "", Certification = facts?.Certification ?? "", Imdb = facts?.Imdb,
+                RottenTomatoes = facts?.RottenTomatoes, Tmdb = facts?.Tmdb ?? show.Score, Votes = facts?.Votes ?? 0 });
+        if (!BrowseService.Matches(movie, filter with { Query = "", Country = "" })) return false;
+        if (filter.Country.Length > 0 && !string.Equals(facts?.Country, filter.Country, StringComparison.OrdinalIgnoreCase)) return false;
+        if (filter.Completion == "completed" && show.CompletionPercent != 100
+            || filter.Completion == "partial" && !(show.HasWatchedEpisodes && show.CompletionPercent != 100)) return false;
+        if (filter.Matched != "any" && (filter.Matched == "yes") != show.TmdbId.HasValue) return false;
+        return (filter.WatchedFrom.Length == 0 && filter.WatchedTo.Length == 0)
+            || store.Tv.History.Any(x => SameShow(show, x) && WatchDateMatches(x, filter));
+    }
+
+    /// <summary>Compares explicit show identifiers without matching movie IDs or ambiguous titles.</summary>
+    private static bool SameShow(TvSeries show, TvWatch watch) => show.TmdbId.HasValue && show.TmdbId == watch.TmdbId
+        || show.TvdbId > 0 && show.TvdbId == watch.TvdbId;
+
+    /// <summary>Applies calendar watch dates using the browser's timezone offset.</summary>
+    private static bool WatchDateMatches(TvWatch watch, BrowseOptions filter)
+    {
+        var date = DateTimeOffset.FromUnixTimeSeconds(watch.WatchedAt).AddMinutes(filter.UtcOffset).ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
+        return (filter.WatchedFrom.Length == 0 || string.CompareOrdinal(date, filter.WatchedFrom) >= 0)
+            && (filter.WatchedTo.Length == 0 || string.CompareOrdinal(date, filter.WatchedTo) <= 0);
+    }
+
+    /// <summary>Loads season episodes and overlays current distinct watch history, with a Sonarr fallback for managed shows.</summary>
+    public async Task<List<TvSeasonEpisode>> SeasonAsync(int id, int season, bool managed, CancellationToken ct)
+    {
+        if (id <= 0 || season is < 0 or > 10000) throw new ArgumentException("Choose a valid TV season.");
+        var show = managed ? await ManagedDetailAsync(id, ct) : await DetailAsync(id, ct);
+        List<TvSeasonEpisode> episodes = [];
+        try { if (show.TmdbId is int tmdb) episodes = await metadata.SeasonAsync(tmdb, season, ct); }
+        catch (UpstreamException) when (show.SonarrId > 0) { /* Sonarr can still describe the managed season. */ }
+        if (episodes.Count == 0 && show.SonarrId > 0)
+        {
+            var json = await api.SonarrAsync(store.Settings, $"episode?seriesId={show.SonarrId}", ct);
+            episodes = json.Items().Where(x => x.Number("seriesId") == show.SonarrId && x.Number("seasonNumber") == season)
+                .Select(x => new TvSeasonEpisode(season, (int)x.Number("episodeNumber"), x.Text("title"), x.Text("airDate"), x.Text("overview")))
+                .DistinctBy(x => x.Episode).OrderBy(x => x.Episode).ToList();
+        }
+        var watched = store.Tv.History.Where(x => SameShow(show, x) && x.Season == season && x.Episode.HasValue)
+            .GroupBy(x => x.Episode!.Value).ToDictionary(x => x.Key, x => x.Max(w => w.WatchedAt));
+        return episodes.Select(x => watched.TryGetValue(x.Episode, out var stamp) ? x with { Watched = true, WatchedAt = stamp } : x).ToList();
+    }
+
     /// <summary>Lists actual upcoming Sonarr episodes over fourteen days, preserving air times and keeping movie discovery separate.</summary>
-    private async Task<TvPage> UpcomingAsync(string text, int page, int size, CancellationToken ct)
+    private async Task<TvPage> UpcomingAsync(string text, int page, int size, BrowseOptions filter, CancellationToken ct)
     {
         const string notice = "Episodes airing in the next 14 days from your Sonarr collection. Air times use your browser's local time.";
         if (store.Settings.SonarrKey.Length == 0) return new([], [], 1, 1, 0, false, "Connect Sonarr in Connections to see episodes airing soon in your collection.");
@@ -213,7 +324,8 @@ public sealed class TvService(StateStore store, MediaApi api, PlexService plex, 
             if (show is null && episode.TryGetProperty("series", out var series) && series.ValueKind == JsonValueKind.Object) show = ParseSonarr(series);
             if (show is null || (text.Length > 0 && !show.Title.Contains(text, StringComparison.OrdinalIgnoreCase)
                 && !episode.Text("title").Contains(text, StringComparison.OrdinalIgnoreCase))) continue;
-            episodes.Add(Annotate(show) with { AiringEpisode = new((int)episode.Number("seasonNumber"), (int)episode.Number("episodeNumber"), episode.Text("title"), air) });
+            show = Annotate(show);
+            if (Matches(show, filter)) episodes.Add(show with { AiringEpisode = new((int)episode.Number("seasonNumber"), (int)episode.Number("episodeNumber"), episode.Text("title"), air) });
         }
         episodes = episodes.OrderBy(x => x.AiringEpisode!.AirsAt).ToList();
         var pages = Math.Max(1, (int)Math.Ceiling(episodes.Count / (double)size));
@@ -227,6 +339,35 @@ public sealed class TvService(StateStore store, MediaApi api, PlexService plex, 
         var series = await metadata.ResolveAsync(new TvSeries(id, 0, "TV series", 0, "", null), ct);
         await metadata.SaveAsync(ct);
         return Annotate(series);
+    }
+
+    /// <summary>Enriches only the displayed history page while retaining Plex details during optional metadata outages.</summary>
+    private async Task<TvWatch> EnrichWatchAsync(TvWatch watch, CancellationToken ct)
+    {
+        var series = Annotate(new TvSeries(watch.TmdbId, watch.TvdbId ?? 0, watch.SeriesTitle, 0, "", watch.Poster, SonarrId: watch.SonarrId));
+        try { series = Annotate(await metadata.ResolveAsync(series, ct)); }
+        catch (UpstreamException) { /* Preserve source metadata and local artwork when TMDB is unavailable. */ }
+        var details = watch.Details;
+        if (series.TmdbId is int tmdb && watch.Season is int season && watch.Episode is int episode)
+        {
+            try
+            {
+                var resolved = await metadata.EpisodeAsync(tmdb, season, episode, ct);
+                if (resolved is not null) details = resolved with { Facts = resolved.Facts with {
+                    Imdb = details?.Facts.Imdb, RottenTomatoes = details?.Facts.RottenTomatoes,
+                    RatingOrigin = details?.Facts.Imdb.HasValue == true || details?.Facts.RottenTomatoes.HasValue == true ? "Plex / TMDB" : "TMDB" } };
+            }
+            catch (UpstreamException) { /* Episode metadata failure cannot hide a recorded watch. */ }
+        }
+        return watch with { TmdbId = series.TmdbId, Poster = series.Poster, Details = details, Series = series };
+    }
+
+    /// <summary>Returns episode metadata in the TV namespace and saves it for subsequent drawer and timeline views.</summary>
+    public async Task<TvEpisode?> EpisodeDetailAsync(int id, int season, int episode, CancellationToken ct)
+    {
+        var result = await metadata.EpisodeAsync(id, season, episode, ct);
+        await metadata.SaveAsync(ct);
+        return result;
     }
 
     /// <summary>Opens managed series by TVDB ID even when optional TMDB mapping or artwork is unavailable.</summary>
@@ -277,11 +418,16 @@ public sealed class TvService(StateStore store, MediaApi api, PlexService plex, 
     {
         var managed = store.Tv.Library.FirstOrDefault(x => (value.TmdbId.HasValue && x.TmdbId == value.TmdbId)
             || (value.TvdbId > 0 && x.TvdbId == value.TvdbId));
-        value = metadata.Cached(value);
+        value = metadata.Cached(value with { Facts = managed?.Facts ?? value.Facts });
+        var watched = store.Tv.History.Where(x => SameShow(value, x)).ToArray();
+        var count = watched.Where(x => x.Season > 0 && x.Episode > 0).DistinctBy(x => (x.Season, x.Episode)).Count();
+        var total = value.Facts?.Episodes > 0 ? value.Facts.Episodes : managed?.EpisodeCount ?? value.EpisodeCount;
+        var seasons = value.Facts?.SeasonList.Count > 0 ? value.Facts.SeasonList : managed?.Facts?.SeasonList ?? [];
         return value with { SonarrId = managed?.SonarrId ?? value.SonarrId, InSonarr = managed is not null || value.InSonarr,
             EpisodeFileCount = managed?.EpisodeFileCount ?? value.EpisodeFileCount, EpisodeCount = managed?.EpisodeCount ?? value.EpisodeCount,
-            HasWatchedEpisodes = store.Tv.History.Any(x => (value.TmdbId.HasValue && x.TmdbId == value.TmdbId)
-                || (value.TvdbId > 0 && x.TvdbId == value.TvdbId)) };
+            Facts = value.Facts is null ? null : value.Facts with { SeasonList = seasons },
+            HasWatchedEpisodes = watched.Length > 0, WatchedEpisodeCount = count,
+            CompletionPercent = total > 0 ? count >= total ? 100 : Math.Min(99, (int)Math.Round(count * 100d / total, MidpointRounding.AwayFromZero)) : null };
     }
 
     /// <summary>Reads Sonarr series statistics and safe TMDB artwork without borrowing movie metadata.</summary>
@@ -291,8 +437,18 @@ public sealed class TvService(StateStore store, MediaApi api, PlexService plex, 
         var poster = Uri.TryCreate(image, UriKind.Absolute, out var uri) && uri.Host == "image.tmdb.org"
             ? JsonFields.PosterPath("/" + uri.Segments.Last()) : null;
         var stats = json.TryGetProperty("statistics", out var statistics) ? statistics : default;
+        var ratings = json.TryGetProperty("ratings", out var scores) ? scores : default;
+        var imdb = ratings.ValueKind == JsonValueKind.Object && ratings.TryGetProperty("imdb", out var score) ? score.Number("value") : (double?)null;
+        var language = json.TryGetProperty("originalLanguage", out var originalLanguage) && originalLanguage.ValueKind == JsonValueKind.Object
+            ? originalLanguage.Text("name") : json.Text("originalLanguage");
         return new(Positive(json, "tmdbId"), (int)json.Number("tvdbId"), json.Text("title"), (int)json.Number("year"),
-            json.Text("overview"), poster, InSonarr: true, EpisodeFileCount: (int)stats.Number("episodeFileCount"), EpisodeCount: (int)stats.Number("episodeCount"), SonarrId: (int)json.Number("id"));
+            json.Text("overview"), poster, InSonarr: true, EpisodeFileCount: (int)stats.Number("episodeFileCount"), EpisodeCount: (int)stats.Number("episodeCount"), SonarrId: (int)json.Number("id"),
+            Facts: new(json.Items("genres").Select(x => x.GetString() ?? "").ToList(), json.Text("status"), 0, 0, (int)json.Number("runtime"), language, null, []) {
+                Imdb = imdb is >= 0 and <= 10 ? imdb : null, ImdbId = json.Text("imdbId"), RatingOrigin = "Sonarr",
+                FirstAirDate = json.Text("firstAired").Split('T')[0],
+                SeasonList = json.Items("seasons").Select(x => new TvSeason((int)x.Number("seasonNumber"),
+                    x.Number("seasonNumber") == 0 ? "Specials" : "Season " + (int)x.Number("seasonNumber"),
+                    x.TryGetProperty("statistics", out var s) ? (int)s.Number("totalEpisodeCount") : 0)).ToList() });
     }
 
     /// <summary>Projects TMDB show fields; TV names and first-air dates are distinct from movie fields.</summary>
@@ -303,10 +459,15 @@ public sealed class TvService(StateStore store, MediaApi api, PlexService plex, 
     /// <summary>Sorts the selected TV data without consulting movie ratings or movie watches.</summary>
     private static List<TvSeries> Sort(List<TvSeries> values, string sort, string order)
     {
-        IEnumerable<TvSeries> sorted = sort switch
-        { "title" => values.OrderBy(x => x.Title, StringComparer.OrdinalIgnoreCase), "year" => values.OrderBy(x => x.Year), "score" => values.OrderBy(x => x.Score), _ => values };
-        return ((sort is "title" or "year" or "score") && order == "desc" ? sorted.Reverse() : sorted).ToList();
+        if (sort == "default") return values;
+        return (order == "asc" ? values.OrderBy(x => SortKey(x, sort) is null).ThenBy(x => SortKey(x, sort))
+            : values.OrderBy(x => SortKey(x, sort) is null).ThenByDescending(x => SortKey(x, sort))).ToList();
     }
+
+    /// <summary>Selects comparable TV fields while leaving missing ratings at the end of either sort direction.</summary>
+    private static IComparable? SortKey(TvSeries show, string sort) => sort switch { "title" => show.Title.ToUpperInvariant(), "year" => show.Year,
+        "tmdb" or "score" => show.Score, "imdb" => show.Facts?.Imdb, "rt" => show.Facts?.RottenTomatoes,
+        "runtime" => show.Facts?.Runtime > 0 ? show.Facts.Runtime : null, "votes" => show.Facts?.Votes, "popularity" => show.Facts?.Popularity, _ => null };
 
     /// <summary>Accepts Plex's numeric parent field or its equivalent grandparent metadata path without treating an episode GUID as a show ID.</summary>
     private static string ShowKey(JsonElement row)

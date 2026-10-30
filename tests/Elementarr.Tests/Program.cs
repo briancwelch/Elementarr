@@ -283,6 +283,8 @@ internal sealed class MediaFixture : HttpMessageHandler, IHttpClientFactory
     public int PlexParentMode { get; set; } = 1;
     public int SonarrAdds { get; private set; }
     public int TvRequests { get; private set; }
+    public bool PagedTv { get; set; }
+    public int TvSeasonRequests { get; private set; }
     public bool LastTvSearchNow { get; private set; }
     private readonly List<object> tvAdded = [];
     public int? BrokenHistoryOffset { get; set; }
@@ -361,6 +363,8 @@ internal sealed class MediaFixture : HttpMessageHandler, IHttpClientFactory
             if (FailPlex) return new HttpResponseMessage(HttpStatusCode.ServiceUnavailable);
             if (uri.AbsolutePath == "/identity") return Json(new { MediaContainer = new { machineIdentifier = "plex-server-1" } });
             if (uri.AbsolutePath == "/accounts") return Json(new { MediaContainer = new { Account = new[] { new { id = 1, name = "fixture.owner" } } } });
+            if (uri.AbsolutePath.EndsWith("/thumb"))
+                return new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Zl8sAAAAASUVORK5CYII=")) { Headers = { ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("image/png") } } };
             if (uri.AbsolutePath == "/status/sessions/history/all")
             {
                 if (!uri.Query.Contains("accountID=1") || uri.Query.Contains("type=")) throw new InvalidOperationException("Plex history must use the documented owner filter without an unsupported type filter.");
@@ -444,15 +448,43 @@ internal sealed class MediaFixture : HttpMessageHandler, IHttpClientFactory
         if (uri.Host == "api.themoviedb.org")
         {
             if (request.Headers.Authorization?.Parameter != "tmdb-secret") throw new InvalidOperationException("Missing TMDB bearer token.");
+            var episodePath = System.Text.RegularExpressions.Regex.Match(uri.AbsolutePath, @"^/3/tv/(\d+)/season/(\d+)/episode/(\d+)$");
+            if (episodePath.Success)
+                return Json(new { id = 9001, name = "The Fixture Episode", overview = "An episode-specific synopsis.", air_date = "2020-02-03",
+                    season_number = int.Parse(episodePath.Groups[2].Value), episode_number = int.Parse(episodePath.Groups[3].Value),
+                    still_path = "/episode-still.jpg", runtime = 24, vote_average = 8.7, vote_count = 42,
+                    external_ids = new { imdb_id = "tt7654321" },
+                    credits = new { cast = new[] { new { name = "Episode Actor", character = "Guest", profile_path = "/actor.jpg" } },
+                        crew = new[] { new { job = "Director", name = "Episode Director" } } } });
+            var seasonPath = System.Text.RegularExpressions.Regex.Match(uri.AbsolutePath, @"^/3/tv/(\d+)/season/(\d+)$");
+            if (seasonPath.Success)
+            {
+                TvSeasonRequests++;
+                var season = int.Parse(seasonPath.Groups[2].Value);
+                return Json(new { id = 901, season_number = season, episodes = Enumerable.Range(1, 4).Select(number => new {
+                    season_number = season, episode_number = number, name = "Episode " + number, air_date = "2020-02-03", overview = "Episode synopsis", still_path = "/episode-still.jpg" }) });
+            }
             if (uri.AbsolutePath.StartsWith("/3/tv/") && int.TryParse(uri.AbsolutePath.Split('/').Last(), out var tvId))
             {
                 TvRequests++;
                 return Json(new { id = tvId, name = "Series " + tvId, first_air_date = "2020-01-01", overview = "TV overview", poster_path = "/poster.jpg", vote_average = 8.1, vote_count = 100,
-                    external_ids = new { tvdb_id = 100 + tvId } });
+                    external_ids = new { tvdb_id = 100 + tvId, imdb_id = "tt1234567" }, backdrop_path = "/show-backdrop.jpg", tagline = "The series tagline",
+                    genres = new[] { new { name = "Comedy" } }, episode_run_time = new[] { 22 }, original_language = "en", status = "Ended", number_of_seasons = 9, number_of_episodes = tvId == 50 ? 8 : 180,
+                    seasons = new[] { new { season_number = 0, name = "Specials", episode_count = 2 }, new { season_number = 2, name = "Season 2", episode_count = 4 } },
+                    created_by = new[] { new { name = "Series Creator" } }, production_countries = new[] { new { iso_3166_1 = "US", name = "United States" } }, production_companies = new[] { new { name = "Fixture Studio" } },
+                    credits = new { cast = new[] { new { name = "Series Actor", character = "Lead", profile_path = "/actor.jpg" } } },
+                    images = new { logos = new[] { new { iso_639_1 = "en", file_path = "/series-logo.png" } } },
+                    videos = new { results = new[] { new { site = "YouTube", type = "Trailer", key = "fixture123" } } },
+                    content_ratings = new { results = new[] { new { iso_3166_1 = "US", rating = "TV-PG" } } } });
             }
             if (uri.AbsolutePath.StartsWith("/3/trending/tv") || uri.AbsolutePath.StartsWith("/3/search/tv") || uri.AbsolutePath.Contains("/recommendations") && uri.AbsolutePath.StartsWith("/3/tv/"))
             {
                 TvRequests++;
+                if (PagedTv)
+                {
+                    var providerPage = int.Parse(System.Web.HttpUtility.ParseQueryString(uri.Query)["page"]!);
+                    return Json(new { total_pages = 12, total_results = 12, results = new[] { new { id = 20 + providerPage, name = "Provider Series", first_air_date = "2020-01-01" } } });
+                }
                 return Json(new { total_pages = 1, total_results = 2, results = new[] { new { id = 1, name = "Fixture Series", first_air_date = "2020-01-01" }, new { id = 8, name = "Another Series", first_air_date = "2021-02-01" } } });
             }
             if (uri.AbsolutePath.EndsWith("/configuration")) return Json(new { images = new { } });

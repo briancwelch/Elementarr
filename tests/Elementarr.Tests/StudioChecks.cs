@@ -132,6 +132,19 @@ internal static class StudioChecks
         check(!index.Flag("running") && index.Number("failed") == 1
             && index.Items("unavailable").Single().Text("name") == "Unavailable Fixture",
             "Metadata refresh failures identify the actual affected movie and complete without discarding its library record");
+        var beforeRepair = store.Snapshot;
+        var beforeTvRepair = JsonSerializer.Serialize(store.Tv);
+        await store.SaveSnapshotAsync(beforeRepair with { Library = [new(11, "", "Repair me", 2020, "", null, true, true),
+            new(12, "", "Ambiguous", 2020, "", null, true, true), new(13, "", "Ambiguous", 2020, "", null, true, true)],
+            History = [new("repair", "repair", "Repair me", 2020, 1760000000, null, null, true),
+                new("explicit", "explicit", "Repair me", 2020, 1760000000, null, 42, true),
+                new("ambiguous", "ambiguous", "Ambiguous", 2020, 1760000000, null, null, true)] }, default);
+        check((await browser.PostAsJsonAsync("/api/metadata/refresh-matches", new { })).IsSuccessStatusCode, "Movie metadata and match repair can be queued from Connections");
+        for (var attempt = 0; attempt < 50 && (await GetAsync(browser, "metadata/status")).Flag("running"); attempt++) await Task.Delay(20);
+        check(store.Snapshot.History.Single(x => x.Id == "repair").TmdbId == 11 && store.Snapshot.History.Single(x => x.Id == "explicit").TmdbId == 42
+            && store.Snapshot.History.Single(x => x.Id == "ambiguous").TmdbId is null && store.Snapshot.History.Count == 3
+            && JsonSerializer.Serialize(store.Tv) == beforeTvRepair, "Movie match refresh repairs unique title/year matches while preserving explicit matches, ambiguous plays, counts and TV history");
+        await store.SaveSnapshotAsync(beforeRepair, default);
         using var anonymous = new HttpClient { BaseAddress = browser.BaseAddress };
         check((await anonymous.GetAsync("/api/browse?view=history")).StatusCode == HttpStatusCode.Unauthorized
             && (await anonymous.PostAsJsonAsync("/api/appearance", appearance)).StatusCode == HttpStatusCode.Unauthorized,

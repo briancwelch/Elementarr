@@ -1,9 +1,9 @@
-Elementarr 0.5.0 refreshes navigation and branding with an atom-and-clapperboard logo, matching favicon and Windows tray/installer icons, a version footer, and an offline changelog.
+Elementarr 0.5.2 adds expandable seasons and episode lists to TV detail cards, with watched markers and poster completion bars based on distinct regular episodes. Rewatches and specials do not inflate show progress.
 
-Movie and TV discovery now have separate collapsible groups. Your collections and watched/affected histories are grouped independently. Episodes Airing Soon shows the next fourteen days from your Sonarr calendar, in your local time.
+TV discovery now shares the extensive movie filter controls, adapted to TV genres, episode runtime, Sonarr collection status and TV certifications. Each view retains its own filters; remote feeds search across provider pages with explicit partial-result notices.
 
-Typography scales across the whole interface and adds category controls. Scrollbars and sliders follow appearance colors. Badge corners default to 4 px, and notifications show a bottom countdown, pause for hover/focus, and fade after a configurable duration (five seconds by default).
+The filter drawer slides underneath the main navigation without hiding it. Timeline mouse wheels scroll vertically; Shift-wheel, trackpads, dragging and arrow controls support horizontal navigation. TV detail artwork spans the full card width, and TV paging uses TV loading messages.
 
-Search updates results as you type and cancels stale requests. The account footer puts your Plex username first, uses your Plex avatar when available, and asks for confirmation before signing out.
+Connections automatically recheck saved services with toast feedback. Radarr includes Refresh Movie Metadata & Matches; history sync buttons appear only in Plex and Tautulli. The favicon is circular with transparent corners.
 
-Public signed automatic updates remain enabled without a GitHub token. Use the full Windows installer to update the tray/installer branding as well as the service; normal automatic payloads update the service and web interface.
+Includes the previous TV metadata/card improvements and dedicated Administration update/server tabs. Signed automatic updates remain public and token-free, preserving all persistent settings and history.

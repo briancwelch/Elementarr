@@ -85,9 +85,10 @@ function readAppearance() {
 }
 
 /** Switches admin sections without navigating or submitting the settings form. */
-function adminTab(name) {
-  for (const key of ['appearance', 'wording', 'metadata']) $('#admin-' + key).hidden = key !== name;
-  $('#appearance-form').classList.toggle('metadata-tab', name === 'metadata');
+export function adminTab(name) {
+  for (const key of ['appearance', 'wording', 'metadata', 'updates', 'server']) $('#admin-' + key).hidden = key !== name;
+  $('#appearance-form').hidden = !['appearance', 'wording'].includes(name);
+  $('#removed-movie-history').hidden = name !== 'metadata';
   document.querySelectorAll('[data-admin-tab]').forEach((button) => button.classList.toggle('active', button.dataset.adminTab === name));
   if (name === 'metadata') void pollMetadata();
 }

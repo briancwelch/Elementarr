@@ -12,17 +12,17 @@ Plex is the only application sign-in. The first verified Plex account owns a fre
 
 TMDB supplies movie and TV posters, descriptions, ratings, genres, credits, and discovery. Its developer API is **free for non-commercial use with attribution**, as explained in the [official FAQ](https://developer.themoviedb.org/docs/faq). Elementarr displays TMDB's required credit. Create/sign in to TMDB, request API access in [Settings > API](https://www.themoviedb.org/settings/api), and copy the **API Read Access Token** into Connections > TMDB. Use that long token rather than the shorter v3 API key.
 
-Configure your own Radarr/Sonarr URL and API key, check connections, and choose each service's root folder and quality profile. Movie and TV histories remain separate. TV artwork can fall back to authenticated Sonarr/Plex image proxies; source credentials are never placed in image URLs. Existing incomplete TV snapshots repair in the background, with an explicit Refresh TV metadata & matches action available in Connections.
+Configure your own Radarr/Sonarr URL and API key, then choose each service's root folder and quality profile. Connections automatically rechecks saved services when opened. Radarr offers Refresh Movie Metadata & Matches; history sync actions are in Plex and Tautulli. Movie and TV histories remain separate. TV artwork can fall back to authenticated Sonarr/Plex image proxies; source credentials are never placed in image URLs. Existing incomplete TV snapshots repair in the background, with an explicit Refresh TV metadata & matches action available in Connections.
 
 ## Public automatic updates
 
 Public automatic updates are enabled by default. No GitHub account, token, or update configuration is required. Existing installations keep their saved check/install preferences, and legacy GitHub update tokens are discarded.
 
-The installed Windows service checks the public stable release after startup and every six hours. Automatic installation can be disabled independently in **Connections > Automatic updates**; Check for updates / Install update remain explicit actions. Downloads are anonymous and must pass publisher-signature, SHA-256, and byte-count verification before stopping anything. A temporary GitHub rate limit is reported and retried on the next scheduled check.
+The installed Windows service checks the public stable release after startup and every six hours. Automatic installation can be disabled independently in **Administration > Automatic Updates**; Check for updates / Install update remain explicit actions. Downloads are anonymous and must pass publisher-signature, SHA-256, and byte-count verification before stopping anything. A temporary GitHub rate limit is reported and retried on the next scheduled check.
 
 The fixed updater stops Elementarr, waits for its executable to exit, backs up application files and private data, installs only the application payload, and requires the new local health endpoint to report the signed version. Failed startup restores the previous application and data. Data, encryption keys, and history are outside the update payload. Tray/updater bootstrap upgrades use the full installer when a newer bootstrap is required; normal automatic updates cover the service and web UI.
 
-Change host/port in Connections > Server & port, save, and restart the service from the tray menu. Local Docker development changes its host port through Compose instead. Private service logs are in `%PROGRAMDATA%\Elementarr\data\logs`. Back up the entire data directory including keys. Do not share it or commit it: it contains personal history, protected credentials, and the keys needed to read those credentials.
+Change host/port in Administration > Server & Port, save, and restart the service from the tray menu. Local Docker development changes its host port through Compose instead. Private service logs are in `%PROGRAMDATA%\Elementarr\data\logs`. Back up the entire data directory including keys. Do not share it or commit it: it contains personal history, protected credentials, and the keys needed to read those credentials.
 
 ## Movie-history cleanup
 

@@ -189,6 +189,10 @@ public static class AppHost
         api.MapGet("/tv/art/{source}/{id:int}", async (string source, int id, TvArtworkService artwork, CancellationToken ct) =>
         { var result = await artwork.GetAsync(source, id, ct); return Results.File(result.Bytes, result.ContentType); });
         api.MapGet("/tv/{id:int}", async (int id, TvService tv, CancellationToken ct) => Results.Ok(await tv.DetailAsync(id, ct)));
+        api.MapGet("/tv/{id:int}/season/{season:int}", async (int id, int season, TvService tv, CancellationToken ct) => Results.Ok(await tv.SeasonAsync(id, season, false, ct)));
+        api.MapGet("/tv/sonarr/{id:int}/season/{season:int}", async (int id, int season, TvService tv, CancellationToken ct) => Results.Ok(await tv.SeasonAsync(id, season, true, ct)));
+        api.MapGet("/tv/{id:int}/season/{season:int}/episode/{episode:int}", async (int id, int season, int episode, TvService tv, CancellationToken ct) =>
+            Results.Ok(await tv.EpisodeDetailAsync(id, season, episode, ct)));
         api.MapGet("/tv/history", (StateStore store) => Results.Ok(store.Tv.History));
         api.MapPost("/sonarr/{id:int}", async (int id, AddRequest request, TvService tv, CancellationToken ct) =>
         { await tv.AddAsync(id, request.SearchNow, ct); return Results.Ok(); });
@@ -215,6 +219,7 @@ public static class AppHost
             Results.Ok(new { matched = await media.MatchHistoryAsync(value, ct) }));
         api.MapGet("/metadata/status", (MetadataIndexer indexer) => Results.Ok(indexer.Status));
         api.MapPost("/metadata/refresh", (MetadataIndexer indexer) => { indexer.Start(); return Results.Ok(indexer.Status); });
+        api.MapPost("/metadata/refresh-matches", (MetadataIndexer indexer) => { indexer.Start(true); return Results.Ok(indexer.Status); });
         api.MapPost("/radarr/{tmdbId:int}/search", async (int tmdbId, MediaService media, CancellationToken ct) =>
             Results.Ok(await media.SearchAsync(tmdbId, ct)));
         api.MapGet("/radarr/commands/{id:int}", async (int id, MediaService media, CancellationToken ct) =>
@@ -289,6 +294,8 @@ public static class AppHost
         }.OfType<string>()).ToList();
         return Results.Ok(new { value.SyncedAt, warnings, value.LibrarySyncedAt, value.HistorySyncedAt,
             tvLibraryCount = tv.Library.Count, tvHistoryCount = tv.History.Count,
+            tvWatchedCount = tv.History.Select(x => x.TmdbId.HasValue && x.Season.HasValue && x.Episode.HasValue
+                ? $"tv:{x.TmdbId}:{x.Season}:{x.Episode}" : $"plex:{x.RatingKey}").Distinct().Count(),
             tvLibrarySyncedAt = tv.LibrarySyncedAt, tvHistorySyncedAt = tv.HistorySyncedAt,
             tvUnmatchedCount = tv.History.Count(x => x.TmdbId is null && x.TvdbId is null),
             value.HistorySource, value.LibraryError, value.HistoryError, unmatchedCount = value.History.Count(x => !x.TmdbId.HasValue), libraryCount = value.Library.Count,

@@ -104,7 +104,7 @@ public sealed class BrowseService(StateStore store, MetadataService metadata, Di
     }
 
     /// <summary>Applies each requested source-specific range, genre, language, date, and library-state filter.</summary>
-    private static bool Matches(Movie movie, BrowseOptions filter)
+    internal static bool Matches(Movie movie, BrowseOptions filter)
     {
         var facts = movie.Facts;
         if (filter.Query.Length > 0 && filter.View is "library" or "history" or "issues"

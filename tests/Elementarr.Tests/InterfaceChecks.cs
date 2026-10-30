@@ -70,7 +70,7 @@ internal static class InterfaceChecks
             check(JsonSerializer.Serialize(store.Snapshot) == movies, "TV calendar and affected-history browsing never modify movie history");
         }
         finally { await store.SaveTvAsync(originalTv, default); }
-        foreach (var asset in new[] { "brand.svg", "favicon.ico" })
+        foreach (var asset in new[] { "brand.svg", "favicon.ico", "favicon.svg" })
             check((await browser.GetAsync("/" + asset)).IsSuccessStatusCode, "Shared brand and favicon assets are served by the packaged application");
     }
 }
