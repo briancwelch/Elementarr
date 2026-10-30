@@ -5,6 +5,13 @@ public sealed record ReleaseNote(string Version, string Date, string Title, stri
 public static class ReleaseNotes
 {
     public static IReadOnlyList<ReleaseNote> All { get; } = [
+        new("0.5.3", "2026-10-30", "Clearer cards and smarter filters", [
+            "Movie and TV card details have darker attached panels. The Private LAN and version panel is darker while the account and sign-out panel keeps its existing appearance.",
+            "TV completion progress appears beneath the episode count instead of covering artwork. Sonarr episode counts and affected-history totals use themed Bootstrap badges.",
+            "TV completion and notification countdown bars use animated Bootstrap stripes, respecting disabled animations and reduced-motion preferences.",
+            "Dismissible Bootstrap 6 chips select included and excluded genres, languages, countries and content certifications, with icons and green/red genre themes.",
+            "Language, country and certification filters accept multiple choices. Minimum TMDB votes uses a slider with a live count and preserves saved thresholds."
+        ]),
         new("0.5.2", "2026-10-30", "Explore every season", [
             "Expandable TV seasons show episode lists and watched status; show posters display completion progress based on distinct regular episodes.",
             "TV discovery and collections have extensive independent year, rating, genre, runtime, language, country, certification, collection and history filters.",

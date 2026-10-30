@@ -110,11 +110,11 @@ function renderTvDetails(series, watch) {
   if (!watch) renderSeasons(series);
 }
 
-/** Shows completion only when an episode total is known, with a native accessible progress meter. */
+/** Shows known episode completion with an accessible, animated Bootstrap progress bar. */
 function progressMarkup(show) {
   if (!Number.isFinite(show.completionPercent)) return '';
   const percent = Math.max(0, Math.min(100, show.completionPercent));
-  return `<span class="show-progress"><strong>${percent}% Complete</strong><progress value="${percent}" max="100" aria-label="${escape(show.title)}: ${percent}% complete">${percent}%</progress></span>`;
+  return `<div class="show-progress"><strong>${percent}% Complete</strong><div class="progress" role="progressbar" aria-valuenow="${percent}" aria-valuemin="0" aria-valuemax="100" aria-label="${escape(show.title)}: ${percent}% complete"><div class="progress-bar progress-bar-striped progress-bar-animated" style="width:${percent}%"></div></div></div>`;
 }
 
 /** Adds lazily loaded, expandable seasons to the shared rich detail card. */
@@ -179,8 +179,7 @@ export function renderTvSeries(series) {
   const grid = document.createElement('div'); grid.className = `movie-grid${app.preferences.layout === 'list' ? ' list-layout' : ''}`;
   for (const show of series) {
     const card = document.createElement('article'); card.className = 'movie-card'; const poster = tvImage(show);
-    card.innerHTML = `<button class="poster-button" aria-label="${escape(show.title)}"><span class="poster-fallback"><i class="fa-solid fa-tv" aria-hidden="true"></i></span>${poster ? `<img src="${poster}" alt="" loading="lazy" referrerpolicy="no-referrer">` : ''}${ratingStrip(tvMedia(show))}</button><div class="movie-info"><button class="movie-title-button"><h3>${escape(show.title)}</h3></button><div class="movie-meta"><span>${escape(show.year || 'TBA')}${show.facts?.runtime ? ` · ${show.facts.runtime} min` : ''}</span><button class="movie-add badge ${show.inSonarr ? 'badge-subtle' : 'badge-outline'} theme-primary"><i class="fa-solid ${show.inSonarr ? 'fa-check' : 'fa-plus'}" aria-hidden="true"></i>${show.inSonarr ? 'In Sonarr' : 'Add to Sonarr'}</button></div><p class="movie-genres">${escape((show.facts?.genres || []).slice(0, 3).join(' · '))}</p><p class="field-help">${show.inSonarr ? `${show.episodeFileCount} episode files in Sonarr` : ''}</p>${show.hasWatchedEpisodes ? '<p class="field-help">Has watched episodes</p>' : ''}<p class="movie-reason">${escape(show.reason)}</p><p class="list-overview">${escape(show.overview)}</p></div>`;
-    card.querySelector('.poster-button').insertAdjacentHTML('beforeend', progressMarkup(show));
+    card.innerHTML = `<button class="poster-button" aria-label="${escape(show.title)}"><span class="poster-fallback"><i class="fa-solid fa-tv" aria-hidden="true"></i></span>${poster ? `<img src="${poster}" alt="" loading="lazy" referrerpolicy="no-referrer">` : ''}${ratingStrip(tvMedia(show))}</button><div class="movie-info"><button class="movie-title-button"><h3>${escape(show.title)}</h3></button><div class="movie-meta"><span>${escape(show.year || 'TBA')}${show.facts?.runtime ? ` · ${show.facts.runtime} min` : ''}</span><button class="movie-add badge ${show.inSonarr ? 'badge-subtle' : 'badge-outline'} theme-primary"><i class="fa-solid ${show.inSonarr ? 'fa-check' : 'fa-plus'}" aria-hidden="true"></i>${show.inSonarr ? 'In Sonarr' : 'Add to Sonarr'}</button></div><p class="movie-genres">${escape((show.facts?.genres || []).slice(0, 3).join(' · '))}</p>${show.inSonarr ? `<p class="field-help"><span class="badge badge-subtle theme-accent">${escape(show.episodeFileCount)} episode files in Sonarr</span></p>` : ''}${progressMarkup(show)}<p class="movie-reason">${escape(show.reason)}</p><p class="list-overview">${escape(show.overview)}</p></div>`;
     card.querySelectorAll('button').forEach((button) => button.addEventListener('click', () => openTv(show)));
     if (show.airingEpisode) {
       const airing = document.createElement('p'); airing.className = 'episode-airing field-help';

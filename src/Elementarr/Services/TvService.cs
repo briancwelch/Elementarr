@@ -265,7 +265,7 @@ public sealed class TvService(StateStore store, MediaApi api, PlexService plex, 
                 Country = facts?.Country ?? "", Certification = facts?.Certification ?? "", Imdb = facts?.Imdb,
                 RottenTomatoes = facts?.RottenTomatoes, Tmdb = facts?.Tmdb ?? show.Score, Votes = facts?.Votes ?? 0 });
         if (!BrowseService.Matches(movie, filter with { Query = "", Country = "" })) return false;
-        if (filter.Country.Length > 0 && !string.Equals(facts?.Country, filter.Country, StringComparison.OrdinalIgnoreCase)) return false;
+        if (!BrowseService.MatchesSelection(facts?.Country, filter.Country)) return false;
         if (filter.Completion == "completed" && show.CompletionPercent != 100
             || filter.Completion == "partial" && !(show.HasWatchedEpisodes && show.CompletionPercent != 100)) return false;
         if (filter.Matched != "any" && (filter.Matched == "yes") != show.TmdbId.HasValue) return false;

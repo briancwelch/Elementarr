@@ -1,3 +1,11 @@
+# Elementarr 0.5.3 validation - October 30, 2026
+
+- **197 integration checks passed on Carbon Windows and in Docker**, including multiple language/country/certification choices, any-of matching, malformed entries, per-value limits, and excessive-selection rejection.
+- **19 frontend DOM regressions passed** using the bundled Bootstrap Chips implementation, including normalized multi-selection values, duplicate prevention, icon rendering, button/keyboard dismissal, safe rejection of unknown genres, restored and cleared filter state, and exact saved vote thresholds.
+- Headless Edge checks passed against isolated upstream fixtures: green/red genre chips, international selections, keyboard removal, reset behavior, live vote counts and submitted vote thresholds, desktop/narrow layouts without horizontal overflow. Card panels were reviewed in grid/list views and at the smallest poster size; Private LAN/version backgrounds are darker and logout backgrounds remain transparent. Fixture artwork was substituted for these browser checks.
+- The source-bound Carbon Docker gate passed for **0.5.3**, with a healthy localhost-only container. The self-contained Windows payload passed fresh Plex-only startup, packaged asset serving, and shutdown with protected identity retained.
+- The exact update ZIP's publisher signature, SHA-256 and size were independently verified. Its seven changed frontend assets match the validated source byte-for-byte, and all 406 archive entries were checked for private-data/signing-key exclusions. Installer, portable package, update ZIP, signed metadata and checksums were built from the validated source.
+
 # Elementarr 0.5.2 validation - October 30, 2026
 
 - **189 integration checks passed on Carbon Windows and in Docker**, including distinct-episode progress and 88-percent rounding, cached season lists with live watch flags, combined extensive TV filters, malformed bounds, multi-provider-page TV filtering, snapshot isolation, and conservative movie match repair.

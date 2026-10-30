@@ -97,6 +97,14 @@ internal static class TvChecks
         finally { await store.SaveTvAsync(savedTv, default); }
         var filteredTv = await browser.GetFromJsonAsync<JsonElement>("/api/tv/browse?view=tv-library&genres=Comedy&genreMode=all&runtimeMin=20&runtimeMax=25&language=en&country=US&certification=TV-PG&tmdbMin=8&votesMin=50&yearFrom=2020&yearTo=2020&owned=yes&watched=yes&completion=partial&releasedFrom=2020-01-01&releasedTo=2020-12-31");
         check(filteredTv.Items("series").Count() == 1, "TV filters combine ratings, votes, genres, runtime, language, country, certification, dates and collection/history states");
+        var chipFilters = await browser.GetFromJsonAsync<JsonElement>("/api/tv/browse?view=tv-library&language=fr,en&country=CA,US&certification=TV-MA,TV-PG");
+        check(chipFilters.Items("series").Count() == 1, "Multiple language, country and certification chips use any-of matching within each filter");
+        foreach (var clause in new[] { "language=fr,de", "country=CA,GB", "certification=TV-MA,TV-14" })
+            check(!(await browser.GetFromJsonAsync<JsonElement>("/api/tv/browse?view=tv-library&" + clause)).Items("series").Any(),
+                "Chip filters reject shows when none of the selected values matches");
+        foreach (var clause in new[] { "country=USA,CA", "language=en,,fr", "certification=TOO-LONG-RATING", "country=" + string.Join(",", Enumerable.Repeat("US", 33)) })
+            check((await browser.GetAsync("/api/tv/browse?view=tv-library&" + clause)).StatusCode == HttpStatusCode.BadRequest,
+                "Chip filters retain per-value limits and reject malformed or excessive selections");
         foreach (var clause in new[] { "excludeGenres=Comedy", "runtimeMax=10", "language=fr", "country=CA", "certification=TV-MA", "completion=completed", "tmdbMin=9", "rtMin=90", "watchedFrom=2099-01-01" })
             check(!(await browser.GetFromJsonAsync<JsonElement>("/api/tv/browse?view=tv-library&" + clause)).Items("series").Any(), "TV filters exclude nonmatching known and missing facts: " + clause);
         check((await browser.GetFromJsonAsync<JsonElement>("/api/tv/browse?view=tv-library&rtMin=90&includeUnrated=true")).Items("series").Any(), "TV rating filters honor include-unrated explicitly");

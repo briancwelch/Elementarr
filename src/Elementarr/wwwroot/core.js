@@ -28,7 +28,7 @@ export async function api(path, body, options = {}) {
 export function notify(message, error = false) {
   const notice = document.createElement('div'); notice.className = `notification${error ? ' error' : ''}`;
   notice.setAttribute('role', error ? 'alert' : 'status');
-  notice.innerHTML = `<i class="fa-solid ${error ? 'fa-circle-exclamation' : 'fa-circle-check'}" aria-hidden="true"></i><span>${escape(message)}</span><button class="btn-text btn-icon" aria-label="${escape(t('action.dismiss'))}"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button><span class="notification-progress" aria-hidden="true"></span>`;
+  notice.innerHTML = `<i class="fa-solid ${error ? 'fa-circle-exclamation' : 'fa-circle-check'}" aria-hidden="true"></i><span>${escape(message)}</span><button class="btn-text btn-icon" aria-label="${escape(t('action.dismiss'))}"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button><span class="notification-progress progress" aria-hidden="true"><span class="progress-bar progress-bar-striped progress-bar-animated"></span></span>`;
   const duration = Math.min(60, Math.max(1, Number(ui.settings.toastDuration) || 5)) * 1000;
   let remaining = duration, last = performance.now(), paused = false, closing = false;
   const progress = notice.querySelector('.notification-progress');

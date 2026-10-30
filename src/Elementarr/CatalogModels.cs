@@ -107,9 +107,12 @@ public sealed record BrowseOptions
             throw new ArgumentException("Choose a valid page and 10, 25, 50, or 100 items per page.");
         if (View is not ("for-you" or "trending" or "upcoming" or "top-rated" or "library" or "history" or "issues"))
             throw new ArgumentException("Choose a valid movie view.");
-        if (Query.Length > 200 || Genres.Length > 400 || ExcludeGenres.Length > 400 || Certification.Length > 12
-            || Language.Length > 20 || Country.Length > 2)
+        if (Query.Length > 200 || Genres.Length > 400 || ExcludeGenres.Length > 400
+            || Language.Length > 400 || Country.Length > 400 || Certification.Length > 400)
             throw new ArgumentException("A filter value is too long.");
+        ValidateSelections(Language, 20);
+        ValidateSelections(Country, 2);
+        ValidateSelections(Certification, 12);
         if (YearFrom is < 1870 or > 2200 || YearTo is < 1870 or > 2200 || YearFrom > YearTo
             || RuntimeMin is < 0 or > 1000 || RuntimeMax is < 0 or > 1000 || RuntimeMin > RuntimeMax
             || VotesMin is < 0 or > 100_000_000)
@@ -128,5 +131,14 @@ public sealed record BrowseOptions
             || Order is not ("asc" or "desc") || Sort is not ("default" or "title" or "year" or "tmdb" or "imdb"
                 or "rt" or "letterboxd" or "runtime" or "votes" or "popularity" or "watched"))
             throw new ArgumentException("Choose valid filter and sorting options.");
+    }
+
+    /// <summary>Accepts bounded comma-separated chip selections while retaining the previous per-value limits.</summary>
+    private static void ValidateSelections(string value, int maximumLength)
+    {
+        if (value.Length == 0) return;
+        var selections = value.Split(',', StringSplitOptions.TrimEntries);
+        if (selections.Length > 32 || selections.Any(item => item.Length == 0 || item.Length > maximumLength))
+            throw new ArgumentException("Choose up to 32 valid values per filter.");
     }
 }

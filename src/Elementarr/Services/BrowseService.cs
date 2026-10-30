@@ -122,13 +122,16 @@ public sealed class BrowseService(StateStore store, MetadataService metadata, Di
         var exclude = filter.ExcludeGenres.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         if (include.Length > 0 && (filter.GenreMode == "all" ? !include.All(genres.Contains) : !include.Any(genres.Contains))) return false;
         if (exclude.Any(genres.Contains)) return false;
-        if (filter.Language.Length > 0 && !string.Equals(facts?.Language, filter.Language, StringComparison.OrdinalIgnoreCase)) return false;
-        if (filter.Country.Length > 0 && !string.Equals(facts?.Country, filter.Country, StringComparison.OrdinalIgnoreCase)) return false;
-        if (filter.Certification.Length > 0 && !string.Equals(facts?.Certification, filter.Certification, StringComparison.OrdinalIgnoreCase)) return false;
+        if (!MatchesSelection(facts?.Language, filter.Language) || !MatchesSelection(facts?.Country, filter.Country)
+            || !MatchesSelection(facts?.Certification, filter.Certification)) return false;
         if (filter.ReleasedFrom.Length > 0 && string.CompareOrdinal(movie.ReleaseDate, filter.ReleasedFrom) < 0
             || filter.ReleasedTo.Length > 0 && (string.IsNullOrEmpty(movie.ReleaseDate) || string.CompareOrdinal(movie.ReleaseDate[..Math.Min(10, movie.ReleaseDate.Length)], filter.ReleasedTo) > 0)) return false;
         return State(movie.InRadarr, filter.Owned) && State(movie.Watched, filter.Watched) && State(movie.Available, filter.Available);
     }
+
+    /// <summary>Matches any selected language, country, or certification, excluding unknown metadata when restricted.</summary>
+    internal static bool MatchesSelection(string? value, string selections) => selections.Length == 0
+        || !string.IsNullOrEmpty(value) && selections.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Contains(value, StringComparer.OrdinalIgnoreCase);
 
     /// <summary>Excludes unknown scores only when a range is active and the user has not opted to include unrated items.</summary>
     private static bool Range(double? value, double? min, double? max, bool includeUnrated) =>

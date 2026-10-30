@@ -32,7 +32,7 @@ TMDB's developer API is [free for non-commercial use with attribution](https://d
 
 Automatic updates are enabled by default in the Windows service. Elementarr checks for new public releases after startup and every six hours, verifies the publisher signature and download checksum, and installs newer versions automatically. **No GitHub account or token is needed.**
 
-Use **Connections > Automatic updates** to change preferences or check manually. Updates preserve your settings and history, and failed startup restores the previous application and data.
+Use **Administration > Automatic Updates** to change preferences or check manually. Updates preserve your settings and history, and failed startup restores the previous application and data.
 
 ## Your data
 

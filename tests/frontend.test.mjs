@@ -70,6 +70,9 @@ async function browser(query = '') {
     return pending || fetchLocal(path, options);
   };
   const modules = new Map();
+  const bootstrap = new SourceTextModule(readFileSync(resolve(web, 'vendor/bootstrap/bootstrap.bundle.min.js'), 'utf8'), { context });
+  await bootstrap.link(() => { throw new Error('The vendored Bootstrap bundle must be self-contained.'); });
+  await bootstrap.evaluate();
   /** Links the existing module graph while replacing the already-tested Bootstrap drawer implementation with DOM-only primitives. */
   const load = (file) => {
     if (modules.has(file)) return modules.get(file);
@@ -81,7 +84,7 @@ async function browser(query = '') {
         async hide() { this.element.open = false; this.element.dispatchEvent(new window.Event('hidden.bs.drawer')); }
         async toggle() { return this.element.open ? this.hide() : this.show(); }
       }
-      module = new SyntheticModule(['Drawer'], function () { this.setExport('Drawer', Drawer); }, { context, identifier: file });
+      module = new SyntheticModule(['Drawer', 'Chips'], function () { this.setExport('Drawer', Drawer); this.setExport('Chips', bootstrap.namespace.Chips); }, { context, identifier: file });
     } else module = new SourceTextModule(readFileSync(file, 'utf8'), { context, identifier: file });
     modules.set(file, module); return module;
   };
@@ -92,13 +95,14 @@ async function browser(query = '') {
     'UI did not finish startup. ' + errors.join(' | '));
   assert.equal(window.document.querySelector('#login-error').textContent, '', errors.join(' | '));
   return { dom, window, requests, get: (selector) => window.document.querySelector(selector), core: modules.get(resolve(web, 'core.js')).namespace,
-    ui: modules.get(resolve(web, 'ui.js')).namespace.ui, intercept: (callback) => { intercept = callback; }, close: () => window.close() };
+    ui: modules.get(resolve(web, 'ui.js')).namespace.ui, filters: modules.get(resolve(web, 'filters.js')).namespace,
+    intercept: (callback) => { intercept = callback; }, close: () => window.close() };
 }
 
 test('grouped navigation, release footer, and offline changelog use the running version', async () => {
   const page = await browser();
   try {
-    assert.equal(page.get('#app-version').textContent, 'v0.5.2');
+    assert.equal(page.get('#app-version').textContent, 'v0.5.3');
     assert.equal(page.get('#account-name').tagName, 'STRONG');
     assert.deepEqual([...page.window.document.querySelectorAll('.nav-group > summary > span')].map((x) => x.textContent),
       ['Explore Movies', 'Explore TV', 'Your Movies', 'Your Television', 'Manage']);
@@ -286,11 +290,11 @@ test('TV filters use TV terminology, reach the backend, and stay independent of 
     assert.equal(page.get('#open-filters').hidden, false);
     assert.match(page.get('#filter-fields').textContent, /Managed by Sonarr/);
     assert.match(page.get('#filter-fields').textContent, /Episode runtime/);
-    assert.equal(page.get('#filter-fields input[value="Action & Adventure"]').type, 'checkbox');
+    assert.ok(page.get('#filter-genres-options option[value="Action & Adventure"]'));
     page.get('#open-filters').click();
     page.get('#filter-form').elements.runtimeMin.value = '20';
     page.get('#filter-form').elements.runtimeMax.value = '25';
-    page.get('#filter-form').elements.genres.forEach(input => { input.checked = input.value === 'Comedy'; });
+    const genres = page.get('#filter-genres'); genres.value = 'Comedy'; genres.dispatchEvent(new page.window.Event('change'));
     page.get('#filter-form').dispatchEvent(new page.window.Event('submit', { bubbles: true, cancelable: true }));
     await until(() => page.requests.some(x => x.url.pathname === '/api/tv/browse' && x.url.searchParams.get('runtimeMin') === '20' && x.url.searchParams.get('genres') === 'Comedy'), 'TV filters were not passed to the API');
     page.get('[data-view="trending"]').click();
@@ -303,11 +307,73 @@ test('TV filters use TV terminology, reach the backend, and stay independent of 
   } finally { page.close(); }
 });
 
-test('show season expansion fetches episodes once and displays exact watched flags and poster progress', async () => {
+test('Bootstrap filter chips normalize multiple values, prevent duplicates, and dismiss by keyboard or button', async () => {
+  const page = await browser();
+  try {
+    /** Enters a picker value through its real Bootstrap input events. */
+    const add = (name, value) => { const input = page.get('#filter-' + name); input.value = value; input.dispatchEvent(new page.window.Event('change')); };
+    add('genres', 'Drama'); add('genres', 'drama'); add('genres', 'Comedy'); add('excludeGenres', 'Horror');
+    add('language', 'en'); add('language', 'French'); add('country', 'US'); add('country', 'CA');
+    add('certification', 'PG'); add('certification', 'PG-13');
+    assert.equal(page.window.document.querySelectorAll('[data-chip-filter="genres"] .chip').length, 2);
+    assert.ok(page.get('[data-chip-filter="genres"] .theme-success .chip .fa-masks-theater'));
+    assert.ok(page.get('[data-chip-filter="excludeGenres"] .theme-danger .chip .fa-ghost'));
+    assert.ok(page.get('[data-chip-filter="language"] .chip .fa-language'));
+    assert.ok(page.get('[data-chip-filter="country"] .chip .fa-globe'));
+    assert.ok(page.get('[data-chip-filter="certification"] .chip .fa-shield-halved'));
+    const filters = page.filters.readFilters();
+    for (const [key, value] of Object.entries({ genres: 'Drama,Comedy', excludeGenres: 'Horror', language: 'en,fr', country: 'US,CA', certification: 'PG,PG-13' })) assert.equal(filters[key], value);
+    page.get('[data-chip-filter="genres"] .chip-dismiss').click();
+    assert.equal(page.filters.readFilters().genres, 'Comedy');
+    const input = page.get('#filter-excludeGenres'); input.focus();
+    input.dispatchEvent(new page.window.KeyboardEvent('keydown', { key: 'Backspace', bubbles: true }));
+    page.get('[data-chip-filter="excludeGenres"] .chip.active').dispatchEvent(new page.window.KeyboardEvent('keydown', { key: 'Delete', bubbles: true }));
+    assert.equal(page.filters.readFilters().excludeGenres, '');
+    add('genres', '<img src=x onerror=alert(1)>');
+    assert.equal(page.filters.readFilters(), null); assert.equal(page.get('[data-chip-filter="genres"] img'), null);
+    const genres = page.get('#filter-genres'); genres.value = ''; genres.dispatchEvent(new page.window.Event('input'));
+    assert.equal(page.filters.readFilters().genres, 'Comedy');
+  } finally { page.close(); }
+});
+
+test('restored chips remove one summary selection at a time and clear all hidden values', async () => {
+  const page = await browser();
+  try {
+    page.core.app.filters = { genres: 'Drama,Comedy', excludeGenres: 'Horror', language: 'en,fr', country: 'US,CA', certification: 'PG,R' };
+    page.filters.writeFilters();
+    assert.equal(page.window.document.querySelectorAll('#filter-fields .chip').length, 9);
+    assert.match(page.get('#active-filters').textContent, /English/);
+    page.get('#active-filters .theme-success .chip-dismiss').click();
+    assert.equal(page.core.app.filters.genres, 'Comedy');
+    assert.equal(page.get('#filter-form').elements.genres.value, 'Comedy');
+    assert.equal(page.core.app.filters.country, 'US,CA');
+    page.core.app.filters = {}; page.filters.writeFilters();
+    assert.equal(page.window.document.querySelectorAll('#filter-fields .chip').length, 0);
+    for (const name of ['genres', 'excludeGenres', 'language', 'country', 'certification']) assert.equal(page.get('#filter-form').elements[name].value, '');
+  } finally { page.close(); }
+});
+
+test('vote slider displays real thresholds, omits zero, and restores exact older values', async () => {
+  const page = await browser();
+  try {
+    const slider = page.get('[name="votesMin"]'); assert.equal(slider.type, 'range');
+    assert.equal(page.filters.readFilters().votesMin, undefined);
+    slider.value = '7'; slider.dispatchEvent(new page.window.Event('input'));
+    assert.match(slider.closest('fieldset').querySelector('output').textContent, /1,000 votes/);
+    assert.equal(slider.getAttribute('aria-valuetext'), '1,000 votes');
+    assert.equal(page.filters.readFilters().votesMin, '1000');
+    page.core.app.filters = { votesMin: '750' }; page.filters.writeFilters();
+    assert.equal(page.filters.readFilters().votesMin, '750');
+    page.core.app.filters = {}; page.filters.writeFilters();
+    assert.equal(slider.value, '0'); assert.equal(page.filters.readFilters().votesMin, undefined);
+  } finally { page.close(); }
+});
+
+test('show season expansion fetches episodes once and displays exact watched flags and card progress', async () => {
   const page = await browser();
   try {
     page.get('[data-view="tv-library"]').click();
-    await until(() => page.get('#content .show-progress progress'), 'TV poster progress is missing');
+    await until(() => page.get('#content .movie-info .show-progress [role="progressbar"]'), 'TV card progress is missing');
     page.get('#content .poster-button').click();
     await until(() => page.get('#tv-details .tv-season') && !page.get('#tv-details .detail-loading'), 'Show seasons are missing');
     const seasons = [...page.window.document.querySelectorAll('#tv-details .tv-season')];

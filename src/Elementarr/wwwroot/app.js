@@ -409,7 +409,8 @@ function bindEvents() {
   $('#filter-drawer').addEventListener('show.bs.drawer', () => { document.body.classList.add('filters-open'); $('#open-filters').setAttribute('aria-expanded', 'true'); });
   $('#filter-drawer').addEventListener('hidden.bs.drawer', () => { document.body.classList.remove('filters-open'); $('#open-filters').setAttribute('aria-expanded', 'false'); });
   $('#filter-form').addEventListener('submit', async (event) => { event.preventDefault(); if (!$('#filter-form').reportValidity()) return;
-    app.filters = readFilters(); app.page = 1; updateFilterSummary(); if (window.innerWidth < 1100) await drawers.filters.hide(); await loadContent(); });
+    const filters = readFilters(); if (!filters) return;
+    app.filters = filters; app.page = 1; updateFilterSummary(); if (window.innerWidth < 1100) await drawers.filters.hide(); await loadContent(); });
   $('#clear-filters').addEventListener('click', async () => { app.filters = { sort: $('#sort-by').value, order: $('#sort-order').value }; app.page = 1; writeFilters(); await loadContent(); });
   for (const id of ['sort-by', 'sort-order']) $('#' + id).addEventListener('change', async () => { app.filters.sort = $('#sort-by').value; app.filters.order = $('#sort-order').value; app.page = 1; await loadContent(); });
   $('#page-size').addEventListener('change', async () => { app.preferences.pageSize = Number($('#page-size').value); app.page = 1; savePreferences(app.preferences); await loadContent(); });
