@@ -7,6 +7,10 @@
 - The self-contained Windows 0.5.2 payload passed fresh Plex-only startup, packaged assets, and shutdown/identity preservation. Release metadata was signed and verified with the existing publisher key; the actual update ZIP matches its signed hash/size and the validated TV, CSS and favicon assets.
 - The source-bound Carbon Docker gate is healthy at localhost:8090. No upstream add, download search, or real-account history mutation was used for testing.
 
+- Public source commit `332d869` and all six 0.5.2 release assets were published. GitHub's update-ZIP digest matches the locally verified payload; anonymous download of the published manifest matches the signed local bytes.
+- Radium applied the exact payload through its existing signature-verifying updater and returned healthy **0.5.2** as **LocalService** at `radium.local:8090`. Settings hashes, Plex ownership, collection/history counts and the tray process were preserved: **4,099 movies, 3,219 movie watches, 165 TV series and 20,317 episode watches**. These counts were compared against the updater's quiescent data backup, not an older Carbon copy.
+- Deployed assets include season/progress rendering, corrected connection actions and the circular favicon. A fresh startup public-feed check logged **Public update check: idle. Elementarr is up to date.** Rollback code/data remain private under the updater job `a9c3d8b11f9e41039303a314e2b90c36`.
+
 # Elementarr 0.5.0 interface validation - October 29, 2026
 
 - **157 integration checks passed on Windows and in Docker** and cover new appearance defaults/persistence/bounds, authenticated release identity, bounded credential-free Plex avatar proxying and safe Plex-only redirects, fourteen-day Sonarr episode filtering/order/search, separate affected-TV-history browsing, and the shared branding assets.
